@@ -8,13 +8,13 @@ echo ================================================
 echo.
 
 cd /d "%~dp0"
-"C:\Users\tanap\AppData\Local\Programs\Python\Python313\python.exe" -c "import flask" 2>nul
+"path" -c "import flask" 2>nul
 if errorlevel 1 (
     echo Installing Flask...
-    "C:\Users\tanap\AppData\Local\Programs\Python\Python313\python.exe" -m pip install flask
+    "path" -m pip install flask
 )
 
 set PORT=25565
 set ROBOT_API_TOKEN=robot123
-"C:\Users\tanap\AppData\Local\Programs\Python\Python313\python.exe" app.py
+"path" app.py
 pause
