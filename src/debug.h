@@ -19,6 +19,7 @@ public:
     static int logHead;
     static int logCount;
     static bool enabled;
+    static portMUX_TYPE mux;
 
     static void begin() {
         logHead = 0;
@@ -28,10 +29,12 @@ public:
 
     static void log(const char* msg) {
         if (!enabled) return;
+        portENTER_CRITICAL(&mux);
         strncpy(logs[logHead], msg, MAX_MSG_LEN - 1);
         logs[logHead][MAX_MSG_LEN - 1] = '\0';
         logHead = (logHead + 1) % MAX_LOGS;
         if (logCount < MAX_LOGS) logCount++;
+        portEXIT_CRITICAL(&mux);
     }
 
     static void logf(const char* fmt, ...) {
@@ -50,5 +53,6 @@ char Debug::logs[Debug::MAX_LOGS][Debug::MAX_MSG_LEN];
 int Debug::logHead = 0;
 int Debug::logCount = 0;
 bool Debug::enabled = true;
+portMUX_TYPE Debug::mux = portMUX_INITIALIZER_UNLOCKED;
 
 #endif // DEBUG_H

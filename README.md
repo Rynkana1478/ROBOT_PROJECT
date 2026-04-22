@@ -65,6 +65,9 @@ Autonomous 4WD robot with obstacle avoidance, A* pathfinding, and web dashboard 
 git clone https://github.com/Rynkana1478/robot-chassis.git
 cd robot-chassis
 
+# One-time: enable the pre-push secret scanner so credentials can't slip out
+git config core.hooksPath .githooks
+
 cd server
 pip install -r requirements.txt
 cd ..
@@ -83,7 +86,13 @@ cd ..
 
 ### 3. Configure
 
-**You MUST edit `src/config.h` before uploading:**
+**Create your local `src/secrets.h`** (gitignored — never committed):
+
+```bash
+cp src/secrets.example.h src/secrets.h
+```
+
+Then edit `src/secrets.h`:
 ```cpp
 #define WIFI_SSID     "YourHotspot"       // Your phone hotspot name
 #define WIFI_PASSWORD "YourPassword"      // Your hotspot password

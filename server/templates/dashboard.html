@@ -650,13 +650,32 @@
 
 <script>
 const GRID_SIZE = {{ grid_size }};
-const API_TOKEN = '{{ api_token }}';
+let API_TOKEN = localStorage.getItem('robot_api_token') || '';
 let debugLogIndex = 0;
+
+function promptForToken(reason) {
+    const t = window.prompt(reason || 'API token:');
+    if (t) {
+        API_TOKEN = t.trim();
+        localStorage.setItem('robot_api_token', API_TOKEN);
+    }
+    return API_TOKEN;
+}
+
+if (!API_TOKEN) promptForToken('Enter robot API token (matches ROBOT_API_TOKEN on the server):');
 
 function apiFetch(url, options = {}) {
     if (!options.headers) options.headers = {};
     options.headers['X-Robot-Token'] = API_TOKEN;
-    return fetch(url, options);
+    return fetch(url, options).then(r => {
+        if (r.status === 401) {
+            // Stored token rejected — clear and re-prompt for next call
+            localStorage.removeItem('robot_api_token');
+            API_TOKEN = '';
+            promptForToken('Token rejected. Try again:');
+        }
+        return r;
+    });
 }
 
 function fetchStatus() {

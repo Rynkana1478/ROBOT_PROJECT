@@ -1,0 +1,25 @@
+#!/usr/bin/env sh
+# Runs before every `git push`. Blocks the push if check_secrets.py finds anything.
+# To bypass once (use sparingly): git push --no-verify
+
+set -e
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+SCRIPT="$REPO_ROOT/scripts/check_secrets.py"
+
+if [ ! -f "$SCRIPT" ]; then
+    echo "pre-push: $SCRIPT missing, skipping check"
+    exit 0
+fi
+
+# Prefer python3, fall back to python (Windows usually has only `python`)
+if command -v python3 >/dev/null 2>&1; then
+    PY=python3
+elif command -v python >/dev/null 2>&1; then
+    PY=python
+else
+    echo "pre-push: no python on PATH, skipping secret scan" >&2
+    exit 0
+fi
+
+exec "$PY" "$SCRIPT"

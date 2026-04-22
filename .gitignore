@@ -3,6 +3,12 @@
 lib/
 include/
 
+# Secrets — never commit
+src/secrets.h
+
+# Claude Code local settings
+.claude/
+
 # VS Code
 .vscode/
 

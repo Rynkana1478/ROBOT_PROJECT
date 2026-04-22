@@ -40,19 +40,25 @@ public:
     unsigned long lastHeadingUpdate = 0;
     bool mpuReady = false;
     bool compassReady = false;
+    bool servoReady = false;
 
     void begin() {
-        Wire.begin(I2C_SDA, I2C_SCL);
-
         pinMode(US_TRIG, OUTPUT);
         pinMode(US_ECHO, INPUT);
 
-        // ESP32 servo uses LEDC internally
-        // Motors use channels 0-1, so servo gets channel 2+
-        sweepServo.setPeriodHertz(50);           // Standard 50Hz servo
-        sweepServo.attach(SERVO_PIN, 500, 2400); // min/max pulse width in µs
-        sweepServo.write(SERVO_CENTER);
-        delay(300);
+        // Servo: motors already grabbed LEDC ch 0/1 in motors.begin().
+        // ESP32Servo auto-allocates a free timer/channel.
+        // attach() returns 0 (or -1 on some forks) when no channel is free.
+        sweepServo.setPeriodHertz(50);
+        int ch = sweepServo.attach(SERVO_PIN, 500, 2400);
+        servoReady = sweepServo.attached();
+
+        if (servoReady) {
+            // Visible bring-up sweep so you can SEE it works
+            sweepServo.write(SERVO_LEFT);   delay(300);
+            sweepServo.write(SERVO_RIGHT);  delay(300);
+            sweepServo.write(SERVO_CENTER); delay(300);
+        }
 
         initMPU();
         initCompass();

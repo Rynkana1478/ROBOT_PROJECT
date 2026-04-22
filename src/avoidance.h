@@ -14,7 +14,6 @@ enum AvoidState {
     AVOID_IDLE,       // No obstacle - pathfinder has control
     AVOID_SLOWDOWN,   // Obstacle 15-30cm - scanning + curving
     AVOID_BRAKE,      // Obstacle <15cm - emergency brake
-    AVOID_SCANNING,   // Stopped, waiting for sweep to finish
     AVOID_REVERSING,  // Backing up
     AVOID_TURNING     // Turning away from obstacle
 };
@@ -105,9 +104,9 @@ public:
                     motors.brake();
                     int dir2 = sensors.bestDirection();
                     if (dir2 <= 0) {
-                        motors.turnLeft(SPEED_MEDIUM);
+                        motors.turnLeft(SPEED_TURN);
                     } else {
-                        motors.turnRight(SPEED_MEDIUM);
+                        motors.turnRight(SPEED_TURN);
                     }
                     actionTimer = now;
                     state = AVOID_TURNING;
@@ -133,15 +132,6 @@ public:
                 }
                 return true;
 
-            case AVOID_SCANNING:
-                motors.brake();
-                if (sensors.isSweepDone()) {
-                    sensors.clearSweepDone();
-                    motors.backward(SPEED_SLOW);
-                    actionTimer = now;
-                    state = AVOID_REVERSING;
-                }
-                return true;
         }
 
         return false;

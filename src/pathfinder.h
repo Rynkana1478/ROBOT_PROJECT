@@ -158,10 +158,12 @@ public:
         static uint8_t costMap[GRID_SIZE][GRID_SIZE];
         buildCostMap(costMap);
 
-        // A* data structures
+        // A* data structures.
+        // g/f are int32 — with COST_INFLATION=40 + COST_UNKNOWN=20 + COST_DIAGONAL=14
+        // per move, an 800-iter search can exceed int16_t range (32767).
         struct Node {
             int16_t x, y;
-            int16_t g, f;
+            int32_t g, f;
             int16_t parentIdx;
         };
 
@@ -176,7 +178,7 @@ public:
         // Start node
         openList[openCount++] = {
             (int16_t)robotPos.x, (int16_t)robotPos.y,
-            0, (int16_t)octileHeuristic(robotPos.x, robotPos.y, goal),
+            0, octileHeuristic(robotPos.x, robotPos.y, goal),
             -1
         };
 
@@ -240,13 +242,13 @@ public:
                 // Add inflation penalty
                 moveCost += costMap[ny][nx];
 
-                int g = current.g + moveCost;
-                int f = g + octileHeuristic(nx, ny, goal);
+                int32_t g = current.g + moveCost;
+                int32_t f = g + octileHeuristic(nx, ny, goal);
 
                 if (openCount < 300) {
                     openList[openCount++] = {
                         (int16_t)nx, (int16_t)ny,
-                        (int16_t)g, (int16_t)f,
+                        g, f,
                         (int16_t)ci
                     };
                 }
@@ -370,8 +372,9 @@ private:
     }
 
     // --- Reconstruct path from A* result ---
+    // NOTE: layout MUST match the Node struct in findPath().
     void reconstructPath(void* closedList, int16_t cameFrom[GRID_SIZE][GRID_SIZE], GridPoint goal) {
-        struct Node { int16_t x, y, g, f, parentIdx; };
+        struct Node { int16_t x, y; int32_t g, f; int16_t parentIdx; };
         Node* closed = (Node*)closedList;
 
         // Trace back from goal

@@ -1,20 +1,16 @@
 @echo off
-echo ================================================
-echo   4WD Robot Server - Port 25565
-echo   Public IP: Check at ifconfig.me
-echo   Dashboard: http://localhost:25565
-echo   Token: robot123
-echo ================================================
 echo.
-
 cd /d "%~dp0"
-"C:\Users\tanap\AppData\Local\Programs\Python\Python313\python.exe" -c "import flask" 2>nul
+
+python -c "import flask" 2>nul
 if errorlevel 1 (
     echo Installing Flask...
-    "C:\Users\tanap\AppData\Local\Programs\Python\Python313\python.exe" -m pip install flask
+    python -m pip install -r requirements.txt
 )
 
 set PORT=25565
-set ROBOT_API_TOKEN=robot123
-"C:\Users\tanap\AppData\Local\Programs\Python\Python313\python.exe" app.py
+if "%ROBOT_API_TOKEN%"=="" set ROBOT_API_TOKEN=robot123
+rem Cloudflare tunnel starts automatically if cloudflared is installed.
+rem To use a manually-started tunnel instead: set CLOUDFLARE_URL=https://your-tunnel.trycloudflare.com
+python app.py
 pause

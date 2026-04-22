@@ -54,12 +54,13 @@ struct TelemetryData {
     bool compassOk, mpuOk;
 } telemetry;
 
-// Command received from server
+// Command received from server (Core 0 writes, Core 1 reads — needs lock)
 struct Command {
     char cmd[20];
     float x, y;
     bool pending;
 } pendingCmd = {"none", 0, 0, false};
+portMUX_TYPE cmdMux = portMUX_INITIALIZER_UNLOCKED;
 
 // Server URL builder
 String serverURL(const char* path) {
@@ -123,6 +124,12 @@ void setup() {
     pathfinder.begin();
     Debug::begin();
 
+    Serial.printf("Init: servo=%d mpu=%d compass=%d\n",
+                  sensors.servoReady, sensors.mpuReady, sensors.compassReady);
+    if (!sensors.servoReady) {
+        Serial.println("!!! SERVO ATTACH FAILED — check wiring/power. Avoidance sweep disabled.");
+    }
+
     stateMutex = xSemaphoreCreateMutex();
 
     setupWiFi();
@@ -153,9 +160,13 @@ void loop() {
         emergencyBrake = false;
     }
 
-    // Process any pending command from WiFi task
-    if (pendingCmd.pending && !emergencyBrake) {
-        processCommand();
+    // Process any pending command from WiFi task.
+    // Always honor stop/auto/reset, even during emergency brake.
+    if (pendingCmd.pending) {
+        bool isOverride = strcmp(pendingCmd.cmd, "stop") == 0 ||
+                          strcmp(pendingCmd.cmd, "auto") == 0 ||
+                          strcmp(pendingCmd.cmd, "reset") == 0;
+        if (!emergencyBrake || isOverride) processCommand();
     }
 
     if (!autonomousMode) return;
@@ -315,10 +326,13 @@ void fetchCommand() {
         if (!deserializeJson(doc, http.getString())) {
             const char* cmd = doc["cmd"] | "none";
             if (strcmp(cmd, "none") != 0) {
+                portENTER_CRITICAL(&cmdMux);
                 strncpy(pendingCmd.cmd, cmd, 19);
+                pendingCmd.cmd[19] = '\0';
                 pendingCmd.x = doc["x"] | 0.0f;
                 pendingCmd.y = doc["y"] | 0.0f;
                 pendingCmd.pending = true;
+                portEXIT_CRITICAL(&cmdMux);
             }
         }
     }
@@ -326,19 +340,27 @@ void fetchCommand() {
 }
 
 void processCommand() {
+    // Snapshot under lock so Core 0 can't half-write while we read
+    char cmdBuf[20];
+    float cmdX, cmdY;
+    portENTER_CRITICAL(&cmdMux);
+    strncpy(cmdBuf, pendingCmd.cmd, 20);
+    cmdX = pendingCmd.x;
+    cmdY = pendingCmd.y;
     pendingCmd.pending = false;
-    const char* cmd = pendingCmd.cmd;
+    portEXIT_CRITICAL(&cmdMux);
+    const char* cmd = cmdBuf;
 
     if (strcmp(cmd, "forward") == 0)      { autonomousMode = false; motors.forward(SPEED_MEDIUM); }
     else if (strcmp(cmd, "back") == 0)    { autonomousMode = false; motors.backward(SPEED_MEDIUM); }
-    else if (strcmp(cmd, "left") == 0)    { autonomousMode = false; motors.turnLeft(SPEED_MEDIUM); }
-    else if (strcmp(cmd, "right") == 0)   { autonomousMode = false; motors.turnRight(SPEED_MEDIUM); }
+    else if (strcmp(cmd, "left") == 0)    { autonomousMode = false; motors.turnLeft(SPEED_TURN); }
+    else if (strcmp(cmd, "right") == 0)   { autonomousMode = false; motors.turnRight(SPEED_TURN); }
     else if (strcmp(cmd, "stop") == 0)    { autonomousMode = false; motors.stop(); }
     else if (strcmp(cmd, "auto") == 0)    { autonomousMode = true; }
     else if (strcmp(cmd, "set_target") == 0) {
-        pathfinder.setTargetWorld(pendingCmd.x, pendingCmd.y);
+        pathfinder.setTargetWorld(cmdX, cmdY);
         autonomousMode = true;
-        Debug::logf("[CMD] Target: X=%.0f Y=%.0f", pendingCmd.x, pendingCmd.y);
+        Debug::logf("[CMD] Target: X=%.0f Y=%.0f", cmdX, cmdY);
     }
     else if (strcmp(cmd, "backtrack") == 0) { pathfinder.startBacktrack(); autonomousMode = true; }
     else if (strcmp(cmd, "reset") == 0)   { encoder.resetPosition(); pathfinder.begin(); autonomousMode = true; }
@@ -397,22 +419,35 @@ void setupWiFi() {
 // DEBUG FLUSH
 // ============================================
 void debugFlush() {
-    if (Debug::logCount == 0) return;
+    // Snapshot under lock so Core 1 can keep logging while we POST.
+    char snapshot[Debug::MAX_LOGS][Debug::MAX_MSG_LEN];
+    int n = 0;
+    portENTER_CRITICAL(&Debug::mux);
+    if (Debug::logCount > 0) {
+        int start = (Debug::logHead - Debug::logCount + Debug::MAX_LOGS) % Debug::MAX_LOGS;
+        for (int i = 0; i < Debug::logCount; i++) {
+            strncpy(snapshot[n], Debug::logs[(start + i) % Debug::MAX_LOGS], Debug::MAX_MSG_LEN);
+            snapshot[n][Debug::MAX_MSG_LEN - 1] = '\0';
+            n++;
+        }
+        Debug::logCount = 0;
+    }
+    portEXIT_CRITICAL(&Debug::mux);
+
+    if (n == 0) return;
+
     HTTPClient http;
     httpBegin(http, "/api/robot/debug");
     http.addHeader("Content-Type", "application/json");
 
     JsonDocument doc;
     JsonArray arr = doc["logs"].to<JsonArray>();
-    int start = (Debug::logHead - Debug::logCount + Debug::MAX_LOGS) % Debug::MAX_LOGS;
-    for (int i = 0; i < Debug::logCount; i++) {
-        arr.add(Debug::logs[(start + i) % Debug::MAX_LOGS]);
-    }
+    for (int i = 0; i < n; i++) arr.add(snapshot[i]);
+
     String payload;
     serializeJson(doc, payload);
     http.POST(payload);
     http.end();
-    Debug::logCount = 0;
 }
 
 // ============================================
@@ -421,6 +456,8 @@ void debugFlush() {
 void runTest(const char* test) {
     autonomousMode = false;
     motors.stop();
+
+    Debug::logf("===== %s =====", test);
 
     if (strcmp(test, "test_all") == 0)         testAll();
     else if (strcmp(test, "test_i2c") == 0)    testI2C();
@@ -431,8 +468,11 @@ void runTest(const char* test) {
     else if (strcmp(test, "test_motors") == 0) testMotors();
     else if (strcmp(test, "test_encoder") == 0) testEncoders();
     else if (strcmp(test, "test_battery") == 0) testBattery();
+    else                                        Debug::logf("[TEST] Unknown: %s", test);
 
-    debugFlush();
+    Debug::log("===== test done =====");
+    // Don't call debugFlush() here — it does HTTP from Core 1 and races
+    // Core 0's wifiTask. Core 0 will pick up the buffer within 500ms.
 }
 
 void testI2C() {
@@ -451,22 +491,33 @@ void testI2C() {
 }
 
 void testUltrasonic() {
-    Debug::log("[TEST] Ultrasonic...");
-    digitalWrite(US_TRIG, LOW); delayMicroseconds(2);
-    digitalWrite(US_TRIG, HIGH); delayMicroseconds(10);
-    digitalWrite(US_TRIG, LOW);
-    unsigned long dur = pulseIn(US_ECHO, HIGH, 30000);
-    if (dur == 0) Debug::log("[US] ERROR: No echo!");
-    else { Debug::logf("[US] %.1f cm OK", dur / 58.0); }
+    // Five readings so a single bad pulse doesn't make the test look broken
+    int errors = 0;
+    for (int i = 0; i < 5; i++) {
+        digitalWrite(US_TRIG, LOW); delayMicroseconds(2);
+        digitalWrite(US_TRIG, HIGH); delayMicroseconds(10);
+        digitalWrite(US_TRIG, LOW);
+        unsigned long dur = pulseIn(US_ECHO, HIGH, 30000);
+        if (dur == 0) { Debug::logf("[US %d/5] no echo", i + 1); errors++; }
+        else          { Debug::logf("[US %d/5] %.1f cm", i + 1, dur / 58.0); }
+        delay(80);
+    }
+    if (errors == 5)      Debug::log("[US] FAIL: nothing in front, or sensor unwired");
+    else if (errors > 0)  Debug::logf("[US] %d/5 misses (acceptable)", errors);
+    else                  Debug::log("[US] OK");
 }
 
 void testServo() {
-    Debug::log("[TEST] Servo...");
-    sensors.sweepServo.write(SERVO_CENTER); delay(500);
-    sensors.sweepServo.write(SERVO_LEFT);   delay(500);
-    sensors.sweepServo.write(SERVO_RIGHT);  delay(500);
-    sensors.sweepServo.write(SERVO_CENTER); delay(300);
-    Debug::log("[SERVO] Done");
+    if (!sensors.servoReady) {
+        Debug::log("[SERVO] FAIL: attach() returned false at boot — servo never initialized");
+        Debug::log("[SERVO] Check: 5V power, signal wire on GPIO 9, common GND");
+        return;
+    }
+    Debug::log("[SERVO] -> CENTER (90)"); sensors.sweepServo.write(SERVO_CENTER); delay(600);
+    Debug::log("[SERVO] -> LEFT (160)");  sensors.sweepServo.write(SERVO_LEFT);   delay(600);
+    Debug::log("[SERVO] -> RIGHT (20)");  sensors.sweepServo.write(SERVO_RIGHT);  delay(600);
+    Debug::log("[SERVO] -> CENTER (90)"); sensors.sweepServo.write(SERVO_CENTER); delay(400);
+    Debug::log("[SERVO] OK (if you saw it move)");
 }
 
 void testMPU6050() {

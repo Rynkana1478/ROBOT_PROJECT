@@ -8,8 +8,8 @@
 #include <WiFi.h>
 
 // Change these to your hotspot
-#define WIFI_SSID     "Blackwise_2.4G"
-#define WIFI_PASSWORD "0639041446"
+#define WIFI_SSID     "YourSSID"
+#define WIFI_PASSWORD "YourPassword"
 
 void setup() {
     Serial.begin(115200);

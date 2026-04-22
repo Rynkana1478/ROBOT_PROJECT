@@ -12,6 +12,9 @@ Dashboard: http://localhost:5000  (or your cloud URL)
 
 import os
 import json
+import re
+import subprocess
+import threading
 from flask import Flask, render_template, request, jsonify
 from collections import deque
 from functools import wraps
@@ -58,7 +61,7 @@ pending_command = {"cmd": "none"}
 
 STATE_NAMES = {
     0: "IDLE", 1: "SLOWDOWN", 2: "BRAKE",
-    3: "SCANNING", 4: "REVERSING", 5: "TURNING",
+    3: "REVERSING", 4: "TURNING",
 }
 
 GRID_SIZE = 40
@@ -82,7 +85,10 @@ def require_token(f):
 # ============================================
 @app.route("/")
 def dashboard():
-    return render_template("dashboard.html", grid_size=GRID_SIZE, api_token=API_TOKEN)
+    # Token is NOT embedded in the page — dashboard prompts the user
+    # on first load and stores it in localStorage. Otherwise anyone
+    # who can reach this URL gets the API token by viewing source.
+    return render_template("dashboard.html", grid_size=GRID_SIZE)
 
 
 # ============================================
@@ -96,10 +102,22 @@ def robot_report():
     if not data:
         return jsonify({"error": "no json"}), 400
 
+    prev_reached = bool(robot_state.get("target_reached"))
+
     robot_state.update({k: data.get(k, robot_state.get(k, 0)) for k in data})
     robot_state["state_name"] = STATE_NAMES.get(data.get("state", 0), "UNKNOWN")
     robot_state["connected"] = True
     robot_state["last_update"] = time.time()
+
+    # Drain the multi-step AI queue on rising edge of target_reached.
+    # Without this, only the first command in a chain ever runs.
+    now_reached = bool(robot_state.get("target_reached"))
+    if now_reached and not prev_reached and ai_command_queue:
+        cmd = ai_command_queue.popleft()
+        _execute_ai_command(cmd)
+        ts = time.strftime("%H:%M:%S")
+        debug_logs.append(f"[{ts}] [AI] Auto-drain: {json.dumps(cmd)} ({len(ai_command_queue)} left)")
+
     return jsonify({"ok": True})
 
 
@@ -383,11 +401,95 @@ def health():
     return jsonify({"status": "ok", "connected": robot_state["connected"]})
 
 
+def _lan_ips():
+    """Every non-loopback IPv4 the host has, so the phone knows which to use."""
+    import socket
+    ips = set()
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if not ip.startswith("127."):
+                ips.add(ip)
+    except socket.gaierror:
+        pass
+    return sorted(ips)
+
+
+def _public_ip(timeout=1.5):
+    """Best-effort public IP. Returns None if offline or the endpoint is slow."""
+    import requests
+    for url in ("https://api.ipify.org", "https://ifconfig.me/ip"):
+        try:
+            r = requests.get(url, timeout=timeout)
+            if r.status_code == 200 and r.text.strip():
+                return r.text.strip()
+        except requests.RequestException:
+            continue
+    return None
+
+
+def _start_cloudflare_tunnel(port, timeout=20):
+    """Start a quick cloudflared tunnel. Returns the public URL or None."""
+    try:
+        proc = subprocess.Popen(
+            ["cloudflared", "tunnel", "--url", f"http://localhost:{port}"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except FileNotFoundError:
+        return None
+
+    url_holder = [None]
+    pattern = re.compile(r'https://[a-z0-9-]+\.trycloudflare\.com')
+
+    def _read():
+        for line in proc.stderr:
+            m = pattern.search(line)
+            if m:
+                url_holder[0] = m.group(0)
+                break
+
+    t = threading.Thread(target=_read, daemon=True)
+    t.start()
+    t.join(timeout=timeout)
+
+    if url_holder[0] is None:
+        proc.terminate()
+        return None
+
+    # Drain stderr in background so the pipe doesn't block cloudflared
+    threading.Thread(
+        target=lambda: [_ for _ in proc.stderr], daemon=True
+    ).start()
+
+    return url_holder[0]
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 25565))
-    print("=" * 50)
+
+    # Auto-start cloudflare tunnel (skip if URL already provided)
+    cloudflare_url = os.environ.get("CLOUDFLARE_URL")
+    if not cloudflare_url:
+        print("  Starting Cloudflare tunnel (up to 20s)...")
+        cloudflare_url = _start_cloudflare_tunnel(port)
+
+    print("=" * 60)
     print("  4WD Robot Server")
-    print(f"  Token: {API_TOKEN}")
-    print(f"  Dashboard: http://localhost:{port}")
-    print("=" * 50)
-    app.run(host="0.0.0.0", port=port, debug=True)
+    print(f"  Token:      {API_TOKEN}")
+    print(f"  Local:      http://localhost:{port}")
+    for ip in _lan_ips():
+        print(f"  LAN:        http://{ip}:{port}")
+    pub = _public_ip()
+    if pub:
+        print(f"  Public IP:  http://{pub}:{port}  (needs port-forward on your router)")
+    else:
+        print(f"  Public IP:  <offline or lookup failed>")
+    if cloudflare_url:
+        print(f"  Cloudflare: {cloudflare_url}")
+    else:
+        print(f"  Cloudflare: <cloudflared not found — install from https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/>")
+    print("=" * 60)
+
+    app.run(host="0.0.0.0", port=port, debug=os.environ.get("FLASK_DEBUG") == "1")

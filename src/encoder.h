@@ -60,7 +60,9 @@ public:
         float distR = dR * CM_PER_TICK;
         float distAvg = (distL + distR) / 2.0;
 
-        totalDistCm += abs(distAvg);
+        // Total wheel travel (counts turns; pure spin still racks up cm).
+        // Don't use distAvg here — turns make L=-R, distAvg=0, dashboard reads 0.
+        totalDistCm += (abs(distL) + abs(distR)) / 2.0;
 
         // Update position using provided heading (from compass+gyro fusion)
         posX += distAvg * sin(headingRad);

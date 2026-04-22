@@ -38,37 +38,35 @@ public:
     }
 
     void forward(int speed = SPEED_MEDIUM) {
-        Encoder::setDirection(1);
+        Encoder::setDirection(-1);
         setLeft(speed);
         setRight(speed);
     }
 
     void backward(int speed = SPEED_MEDIUM) {
-        Encoder::setDirection(-1);
+        Encoder::setDirection(1);
         setLeft(-speed);
         setRight(-speed);
     }
 
-    void turnLeft(int speed = SPEED_MEDIUM) {
-        Encoder::setDirectionLR(-1, 1);
-        setLeft(-speed);
-        setRight(speed);
-    }
-
-    void turnRight(int speed = SPEED_MEDIUM) {
+    void turnLeft(int speed = SPEED_TURN) {
         Encoder::setDirectionLR(1, -1);
-        setLeft(speed);
-        setRight(-speed);
+        kickAndCruise(-speed, speed);
+    }
+
+    void turnRight(int speed = SPEED_TURN) {
+        Encoder::setDirectionLR(-1, 1);
+        kickAndCruise(speed, -speed);
     }
 
     void curveLeft(int speed = SPEED_MEDIUM) {
-        Encoder::setDirection(1);
+        Encoder::setDirection(-1);
         setLeft(speed / 3);
         setRight(speed);
     }
 
     void curveRight(int speed = SPEED_MEDIUM) {
-        Encoder::setDirection(1);
+        Encoder::setDirection(-1);
         setLeft(speed);
         setRight(speed / 3);
     }
@@ -98,6 +96,18 @@ public:
     void wake()   { digitalWrite(MOTOR_STBY, HIGH); }
 
 private:
+    // Full-power pulse to break static friction, then drop to cruise speed.
+    // Stall-prone wheels otherwise sit still while the others carry all the current.
+    void kickAndCruise(int leftCruise, int rightCruise) {
+        int kickL = (leftCruise  > 0) ?  TURN_KICK_SPEED : (leftCruise  < 0 ? -TURN_KICK_SPEED : 0);
+        int kickR = (rightCruise > 0) ?  TURN_KICK_SPEED : (rightCruise < 0 ? -TURN_KICK_SPEED : 0);
+        setLeft(kickL);
+        setRight(kickR);
+        delay(TURN_KICK_MS);
+        setLeft(leftCruise);
+        setRight(rightCruise);
+    }
+
     void setLeft(int speed) {
         if (speed > 0) {
             digitalWrite(MOTOR_L_AIN1, HIGH);

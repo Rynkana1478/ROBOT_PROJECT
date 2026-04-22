@@ -22,7 +22,7 @@
 
 // --- Ultrasonic Sensor (HC-SR04) ---
 #define US_TRIG       18
-#define US_ECHO       8
+#define US_ECHO       3
 
 // --- Servo (ultrasonic sweep) ---
 #define SERVO_PIN     9
@@ -58,6 +58,13 @@
 #define SPEED_FAST    700
 #define SPEED_MAX     1023
 
+// Turns need more torque than straight-line — TT motors have higher
+// static friction in reverse, and with 4 motors in parallel any
+// marginally-stiff one stalls while the others carry the current.
+#define SPEED_TURN       850    // cruise speed during a spin
+#define TURN_KICK_SPEED  SPEED_MAX
+#define TURN_KICK_MS     100    // full-power pulse to break static friction
+
 // --- Servo Angles ---
 #define SERVO_LEFT    160
 #define SERVO_CENTER  90
@@ -85,21 +92,10 @@
 // --- Breadcrumbs ---
 #define MAX_CRUMBS          100    // 20m range (every 20cm)
 
-// --- WiFi ---
-// CHANGE THESE before uploading!
-#define WIFI_SSID     "YourHotspot"
-#define WIFI_PASSWORD "YourPassword"
-
-// --- Server ---
-// Home PC via cloudflare: "your-tunnel.trycloudflare.com" port 443 HTTPS
-// Home PC direct:         "your-public-ip" port 25565 HTTP
-// Local LAN:              "192.168.x.x" port 25565 HTTP
-#define SERVER_HOST   "192.168.1.100"
-#define SERVER_PORT   25565
-#define SERVER_HTTPS  false
-
-// API token (must match server's ROBOT_API_TOKEN env var)
-#define API_TOKEN     "robot123"
+// --- WiFi / server / token ---
+// All deployment-specific values live in secrets.h (gitignored).
+// Copy secrets.example.h -> secrets.h and fill it in before building.
+#include "secrets.h"
 
 #define REPORT_INTERVAL_MS  200
 
