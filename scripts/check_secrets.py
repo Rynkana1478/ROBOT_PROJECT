@@ -35,16 +35,6 @@ PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
         "Real WIFI_SSID baked into a header. Move it into src/secrets.h.",
     ),
     (
-        "api_token_literal",
-        re.compile(r'#\s*define\s+API_TOKEN\s+"(?!robot123"|change-me")[^"]+"'),
-        "Real API_TOKEN baked in. Use the secrets.h placeholder.",
-    ),
-    (
-        "py_token_default",
-        re.compile(r'API_TOKEN\s*=\s*os\.environ\.get\([^,)]+,\s*"(?!robot123"|change-me")[^"]+"\s*\)'),
-        "Hard-coded fallback for ROBOT_API_TOKEN that isn't the dev placeholder.",
-    ),
-    (
         "private_ip_in_code",
         re.compile(r'"\s*(?:10|192\.168|172\.(?:1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}\s*"'),
         "Hard-coded private IP. Belongs in secrets.h, not source.",

@@ -99,7 +99,6 @@ Then edit `src/secrets.h`:
 #define SERVER_HOST   "192.168.43.100"    // Your PC's IP (or cloudflare URL)
 #define SERVER_PORT   25565               // Match your server port
 #define SERVER_HTTPS  false               // true if using cloudflare tunnel
-#define API_TOKEN     "robot123"          // Must match server token
 ```
 
 ### 4. Upload Firmware

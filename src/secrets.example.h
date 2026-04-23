@@ -15,8 +15,4 @@
 #define SERVER_PORT   25565
 #define SERVER_HTTPS  false
 
-// Must match the server's ROBOT_API_TOKEN env var.
-// Generate one: python -c "import secrets; print(secrets.token_hex(16))"
-#define API_TOKEN     "change-me"
-
 #endif
