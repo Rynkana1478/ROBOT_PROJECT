@@ -87,6 +87,7 @@
 
 // --- Heading ---
 #define GYRO_DEADZONE       0.3   // deg/s - ignore below this
+#define GYRO_MAX_RATE       300.0 // deg/s - reject spikes above this
 
 // --- Encoder ---
 #define TICKS_PER_REV       20

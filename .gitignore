@@ -12,6 +12,14 @@ src/secrets.h
 # VS Code
 .vscode/
 
+# Server runtime files
+server/.cloudflared.log
+server/.tunnel_info
+server/logs/
+
+# Notes (personal)
+Note/
+
 # Python
 __pycache__/
 *.pyc

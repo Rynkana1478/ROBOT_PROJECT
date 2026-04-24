@@ -28,6 +28,7 @@ public:
     Adafruit_MPU6050 mpu;
 
     float gyroZOffset = 0;
+    float prevGyroZ = 0;
     unsigned long lastHeadingUpdate = 0;
     bool mpuReady = false;
 
@@ -73,7 +74,7 @@ public:
         distRight = minRight;
     }
 
-    // Gyro-only heading
+    // Gyro-only heading with outlier rejection
     void updateHeading() {
         unsigned long now = millis();
         if (lastHeadingUpdate == 0) { lastHeadingUpdate = now; return; }
@@ -83,9 +84,14 @@ public:
         float gz = 0;
         if (mpuReady) {
             sensors_event_t a, g, t;
-            mpu.getEvent(&a, &g, &t);
-            gz = (g.gyro.z - gyroZOffset) * 180.0 / PI;
-            if (abs(gz) < GYRO_DEADZONE) gz = 0;
+            if (mpu.getEvent(&a, &g, &t)) {
+                gz = (g.gyro.z - gyroZOffset) * 180.0 / PI;
+                if (abs(gz) > GYRO_MAX_RATE) gz = prevGyroZ;
+                if (abs(gz) < GYRO_DEADZONE) gz = 0;
+                prevGyroZ = gz;
+            } else {
+                gz = 0;
+            }
         }
         gyroRate = gz;
         heading += gz * dt;
@@ -115,7 +121,7 @@ private:
         if (!mpu.begin(0x68, &Wire)) return;
         mpu.setAccelerometerRange(MPU6050_RANGE_2_G);
         mpu.setGyroRange(MPU6050_RANGE_250_DEG);
-        mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+        mpu.setFilterBandwidth(MPU6050_BAND_10_HZ);
         mpuReady = true;
 
         float sum = 0;

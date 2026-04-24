@@ -9,9 +9,27 @@
 
 volatile long encLeftCount  = 0;
 volatile long encRightCount = 0;
+static volatile unsigned long encLeftLastUs  = 0;
+static volatile unsigned long encRightLastUs = 0;
 
-void IRAM_ATTR encLeftISR()  { encLeftCount++; }
-void IRAM_ATTR encRightISR() { encRightCount++; }
+// Minimum 200µs between ticks — TT motor maxes out at ~4000 ticks/s
+#define ENC_DEBOUNCE_US 200
+
+void IRAM_ATTR encLeftISR() {
+    unsigned long now = micros();
+    if (now - encLeftLastUs > ENC_DEBOUNCE_US) {
+        encLeftCount++;
+        encLeftLastUs = now;
+    }
+}
+
+void IRAM_ATTR encRightISR() {
+    unsigned long now = micros();
+    if (now - encRightLastUs > ENC_DEBOUNCE_US) {
+        encRightCount++;
+        encRightLastUs = now;
+    }
+}
 
 class Encoder {
 public:
