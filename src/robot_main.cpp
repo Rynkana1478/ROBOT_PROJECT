@@ -1,7 +1,9 @@
 // ============================================
 // ESP32-S3 4WD Robot Chassis
-// Core 1: Brain (avoidance + navigation + motors)
-// Core 0: Eyes + Comms (sweep + ultrasonic + WiFi)
+// TB6612FNG | Ultrasonic + Servo Sweep
+// Dual Encoders | MPU6050 + QMC5883L Compass
+// A* Pathfinding | Obstacle Avoidance
+// Dual-Core: Core1=Robot, Core0=WiFi
 // ============================================
 
 #include <Arduino.h>
@@ -10,7 +12,6 @@
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <Wire.h>
-#include <ESP32Servo.h>
 
 #include "config.h"
 #include "encoder.h"
@@ -19,10 +20,6 @@
 #include "avoidance.h"
 #include "pathfinder.h"
 #include "debug.h"
-
-// --- Shared sweep data (Core 0 writes, Core 1 reads) ---
-SweepData   sweepData;
-portMUX_TYPE sweepMux = portMUX_INITIALIZER_UNLOCKED;
 
 // --- Global Objects ---
 Motors            motors;
@@ -39,15 +36,13 @@ unsigned long lastPath   = 0;
 bool autonomousMode = true;
 bool emergencyBrake = false;
 
-enum UserIntent { INTENT_NONE, INTENT_FORWARD, INTENT_BACK, INTENT_LEFT, INTENT_RIGHT };
-UserIntent userIntent = INTENT_NONE;
-
-// --- Inter-core communication ---
-TaskHandle_t core0Handle;
+// --- WiFi Task (Core 0) ---
+TaskHandle_t wifiTaskHandle;
 SemaphoreHandle_t stateMutex;
 
+// Shared state for WiFi task (protected by mutex)
 struct TelemetryData {
-    float front, left, right, heading, gyroRate;
+    float front, left, right, heading, compassHeading, gyroRate;
     float posX, posY, distance;
     long encL, encR;
     float battery;
@@ -56,12 +51,10 @@ struct TelemetryData {
     int gridX, gridY, targetGX, targetGY;
     float targetWX, targetWY;
     int crumbs;
-    bool mpuOk;
-    float accelX, accelY, accelZ;
-    float gyroXr, gyroYr;
-    float mpuTemp;
+    bool compassOk, mpuOk;
 } telemetry;
 
+// Command received from server (Core 0 writes, Core 1 reads — needs lock)
 struct Command {
     char cmd[20];
     float x, y;
@@ -69,9 +62,7 @@ struct Command {
 } pendingCmd = {"none", 0, 0, false};
 portMUX_TYPE cmdMux = portMUX_INITIALIZER_UNLOCKED;
 
-// --- WiFi / HTTP ---
-WiFiClientSecure secureClient;
-
+// Server URL builder
 String serverURL(const char* path) {
     String url = SERVER_HTTPS ? "https://" : "http://";
     url += SERVER_HOST;
@@ -80,23 +71,29 @@ String serverURL(const char* path) {
     return url;
 }
 
+// HTTP client with token
+WiFiClientSecure secureClient;
+
 void httpBegin(HTTPClient &http, const char* path) {
     if (SERVER_HTTPS) {
-        secureClient.setInsecure();
+        secureClient.setInsecure(); // Skip cert validation (simple, works for free hosting)
         http.begin(secureClient, serverURL(path));
     } else {
         http.begin(serverURL(path));
     }
-    http.setTimeout(HTTP_TIMEOUT_MS);
+    http.setTimeout(500);
+    http.addHeader("X-Robot-Token", API_TOKEN);
 }
 
 // Forward declarations
-void core0Task(void* param);
-void syncWithServer(bool includeTelemetry, bool includeDebug);
+void wifiTask(void* param);
+void postTelemetry();
+void fetchCommand();
 void processCommand();
 void navigateWithPath();
 void updateMap();
 void setupWiFi();
+void debugFlush();
 
 // Hardware tests
 void runTest(const char* test);
@@ -127,87 +124,85 @@ void setup() {
     pathfinder.begin();
     Debug::begin();
 
-    Serial.printf("Init: mpu=%d\n", sensors.mpuReady);
+    Serial.printf("Init: servo=%d mpu=%d compass=%d\n",
+                  sensors.servoReady, sensors.mpuReady, sensors.compassReady);
+    if (!sensors.servoReady) {
+        Serial.println("!!! SERVO ATTACH FAILED — check wiring/power. Avoidance sweep disabled.");
+    }
 
     stateMutex = xSemaphoreCreateMutex();
+
     setupWiFi();
 
-    xTaskCreatePinnedToCore(core0Task, "core0", 8192, NULL, 1, &core0Handle, 0);
+    // Launch WiFi on Core 0
+    xTaskCreatePinnedToCore(wifiTask, "wifi", 8192, NULL, 1, &wifiTaskHandle, 0);
 
-    Debug::log("Boot complete. Core1=Brain Core0=Eyes+WiFi");
-    Serial.println("=== Robot Ready ===");
+    Debug::log("Boot complete. Dual-core active.");
+    Serial.println("=== Robot Ready (Core1=Robot, Core0=WiFi) ===");
 }
 
 // ============================================
-// MAIN LOOP — Core 1 (Brain)
-// Reads sweep data, runs avoidance + navigation
+// MAIN LOOP (Core 1 - never blocked by WiFi)
 // ============================================
 void loop() {
     unsigned long now = millis();
 
-    // Always read latest sweep distances
-    sensors.updateFromSweep();
+    // Sweep tick every cycle
+    sensors.sweepTick();
 
-    // Process commands — block forward during emergency brake
-    if (pendingCmd.pending) {
-        char peekCmd[20];
-        portENTER_CRITICAL(&cmdMux);
-        strncpy(peekCmd, pendingCmd.cmd, 20);
-        portEXIT_CRITICAL(&cmdMux);
-
-        if (emergencyBrake && strcmp(peekCmd, "forward") == 0) {
-            Debug::log("[BLOCK] Forward blocked — obstacle ahead");
-            portENTER_CRITICAL(&cmdMux);
-            pendingCmd.pending = false;
-            portEXIT_CRITICAL(&cmdMux);
-        } else {
-            processCommand();
+    // Safety: front check always
+    if (sensors.readFrontNow() && sensors.distFront < OBSTACLE_CLOSE) {
+        if (!autonomousMode) {
+            motors.brake();
+            emergencyBrake = true;
         }
+    } else if (emergencyBrake && sensors.servoAtCenter() && sensors.distFront > OBSTACLE_SLOW) {
+        emergencyBrake = false;
     }
 
-    // 20Hz sensor + decision loop
+    // Process any pending command from WiFi task.
+    // Always honor stop/auto/reset, even during emergency brake.
+    if (pendingCmd.pending) {
+        bool isOverride = strcmp(pendingCmd.cmd, "stop") == 0 ||
+                          strcmp(pendingCmd.cmd, "auto") == 0 ||
+                          strcmp(pendingCmd.cmd, "reset") == 0;
+        if (!emergencyBrake || isOverride) processCommand();
+    }
+
+    if (!autonomousMode) return;
+
+    // Sensor + Encoder + Avoidance (50ms = 20Hz)
     if (now - lastScan >= SCAN_INTERVAL_MS) {
         lastScan = now;
 
         sensors.updateHeading();
         encoder.update(sensors.headingRad);
+        pathfinder.updateRobotWorld(encoder.posX, encoder.posY);
 
-        if (autonomousMode) {
-            pathfinder.updateRobotWorld(encoder.posX, encoder.posY);
-            if (pathfinder.isBacktracking())
-                pathfinder.updateBacktrack(encoder.posX, encoder.posY);
-
-            bool avoiding = avoidance.update(sensors, motors);
-            if (!avoiding) {
-                updateMap();
-                navigateWithPath();
-            }
-        } else {
-            if (userIntent == INTENT_FORWARD && sensors.distFront < OBSTACLE_CLOSE) {
-                motors.brake();
-                emergencyBrake = true;
-                Debug::logf("[BRAKE] Obstacle %.0fcm — forward blocked", sensors.distFront);
-            } else if (emergencyBrake && sensors.distFront > OBSTACLE_SLOW) {
-                emergencyBrake = false;
-                if (userIntent == INTENT_FORWARD) {
-                    motors.forward(SPEED_MEDIUM);
-                    Debug::log("[BRAKE] Clear — resuming forward");
-                }
-            }
+        if (pathfinder.isBacktracking()) {
+            pathfinder.updateBacktrack(encoder.posX, encoder.posY);
         }
 
-        // Telemetry snapshot for Core 0
+        bool avoiding = avoidance.update(sensors, motors);
+
+        if (!avoiding) {
+            updateMap();
+            navigateWithPath();
+        }
+
+        // Update telemetry snapshot for WiFi task
         if (xSemaphoreTake(stateMutex, 0) == pdTRUE) {
-            telemetry.front   = sensors.distFront;
-            telemetry.left    = sensors.distLeft;
-            telemetry.right   = sensors.distRight;
+            telemetry.front = sensors.distFront;
+            telemetry.left  = sensors.distLeft;
+            telemetry.right = sensors.distRight;
             telemetry.heading = sensors.heading;
+            telemetry.compassHeading = sensors.compassHeading;
             telemetry.gyroRate = sensors.gyroRate;
-            telemetry.posX    = encoder.posX;
-            telemetry.posY    = encoder.posY;
+            telemetry.posX = encoder.posX;
+            telemetry.posY = encoder.posY;
             telemetry.distance = encoder.totalDistCm;
-            telemetry.encL    = encoder.getLeftCount();
-            telemetry.encR    = encoder.getRightCount();
+            telemetry.encL = encoder.getLeftCount();
+            telemetry.encR = encoder.getRightCount();
             telemetry.battery = sensors.getBatteryVoltage();
             telemetry.avoidState = (int)avoidance.state;
             telemetry.pathLen = pathfinder.pathLength;
@@ -215,186 +210,127 @@ void loop() {
             telemetry.hasTarget = pathfinder.hasTarget;
             telemetry.targetReached = pathfinder.targetReached;
             telemetry.backtracking = pathfinder.isBacktracking();
-            telemetry.gridX   = pathfinder.robotPos.x;
-            telemetry.gridY   = pathfinder.robotPos.y;
+            telemetry.gridX = pathfinder.robotPos.x;
+            telemetry.gridY = pathfinder.robotPos.y;
             telemetry.targetGX = pathfinder.targetGrid.x;
             telemetry.targetGY = pathfinder.targetGrid.y;
             telemetry.targetWX = pathfinder.targetWorldX;
             telemetry.targetWY = pathfinder.targetWorldY;
-            telemetry.crumbs  = pathfinder.crumbCount;
-            telemetry.mpuOk   = sensors.mpuReady;
-            telemetry.accelX  = sensors.accelX;
-            telemetry.accelY  = sensors.accelY;
-            telemetry.accelZ  = sensors.accelZ;
-            telemetry.gyroXr  = sensors.gyroX;
-            telemetry.gyroYr  = sensors.gyroY;
-            telemetry.mpuTemp = sensors.mpuTemp;
+            telemetry.crumbs = pathfinder.crumbCount;
+            telemetry.compassOk = sensors.compassReady;
+            telemetry.mpuOk = sensors.mpuReady;
             xSemaphoreGive(stateMutex);
         }
     }
 
-    // Pathfinding recalc (500ms) — auto mode only
-    if (autonomousMode && now - lastPath >= PATH_UPDATE_MS) {
+    // Pathfinding recalc (500ms)
+    if (now - lastPath >= PATH_UPDATE_MS) {
         lastPath = now;
         pathfinder.findPath();
     }
 }
 
 // ============================================
-// CORE 0 TASK — Eyes + WiFi
-// Continuous servo sweep + ultrasonic reads
-// WiFi sync during servo settle time
+// WIFI TASK (Core 0 - independent)
 // ============================================
-void core0Task(void* param) {
-    // Init servo on Core 0 (owns the hardware)
-    Servo sweepServo;
-    sweepServo.setPeriodHertz(50);
-    int ch = sweepServo.attach(SERVO_PIN, 500, 2400);
-    bool servoOk = sweepServo.attached();
-
-    if (servoOk) {
-        sweepServo.write(SERVO_CENTER);
-        vTaskDelay(300 / portTICK_PERIOD_MS);
-    }
-
-    int step = 0;
-    int dir = 1;
-    unsigned long lastSync = 0;
-    unsigned long lastTelemetry = 0;
+void wifiTask(void* param) {
+    unsigned long lastReport = 0;
+    unsigned long lastDebug = 0;
 
     while (true) {
-        // 1. Move servo to current angle
-        if (servoOk) {
-            int angle = SWEEP_START_ANGLE + step * SWEEP_STEP_DEG;
-            sweepServo.write(angle);
+        unsigned long now = millis();
+
+        if (WiFi.status() != WL_CONNECTED) {
+            WiFi.reconnect();
+            vTaskDelay(5000 / portTICK_PERIOD_MS);
+            continue;
         }
 
-        // 2. During settle time, handle WiFi
-        unsigned long settleStart = millis();
-        while (millis() - settleStart < SERVO_SETTLE_MS) {
-            if (WiFi.status() != WL_CONNECTED) {
-                WiFi.reconnect();
-                vTaskDelay(2000 / portTICK_PERIOD_MS);
-                break;
-            }
-
-            unsigned long now = millis();
-            if (now - lastSync >= SYNC_INTERVAL_MS) {
-                lastSync = now;
-                bool sendTel = (now - lastTelemetry >= TELEMETRY_INTERVAL_MS);
-                bool sendDbg = sendTel;
-                syncWithServer(sendTel, sendDbg);
-                if (sendTel) lastTelemetry = now;
-            }
-
-            vTaskDelay(5 / portTICK_PERIOD_MS);
+        if (now - lastReport >= REPORT_INTERVAL_MS) {
+            lastReport = now;
+            postTelemetry();
+            fetchCommand();
         }
 
-        // 3. Read ultrasonic
-        float d = sensors.readUltrasonic();
-
-        // 4. Store in shared array
-        portENTER_CRITICAL(&sweepMux);
-        sweepData.dist[step] = d;
-        sweepData.fresh = true;
-        portEXIT_CRITICAL(&sweepMux);
-
-        // 5. Advance sweep (bounce at ends)
-        step += dir;
-        if (step >= SWEEP_STEPS) {
-            step = SWEEP_STEPS - 2;
-            dir = -1;
-        } else if (step < 0) {
-            step = 1;
-            dir = 1;
+        if (now - lastDebug >= 500) {
+            lastDebug = now;
+            debugFlush();
         }
+
+        vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 }
 
 // ============================================
-// SYNC — Single round-trip: send data, get command
+// TELEMETRY
 // ============================================
-void syncWithServer(bool includeTelemetry, bool includeDebug) {
+void postTelemetry() {
     HTTPClient http;
-    httpBegin(http, "/api/robot/sync");
+    httpBegin(http, "/api/robot/report");
     http.addHeader("Content-Type", "application/json");
 
     JsonDocument doc;
 
-    if (includeTelemetry && xSemaphoreTake(stateMutex, 10 / portTICK_PERIOD_MS) == pdTRUE) {
-        doc["front"]    = telemetry.front;
-        doc["left"]     = telemetry.left;
-        doc["right"]    = telemetry.right;
-        doc["heading"]  = telemetry.heading;
+    if (xSemaphoreTake(stateMutex, 50 / portTICK_PERIOD_MS) == pdTRUE) {
+        doc["front"] = telemetry.front;
+        doc["left"]  = telemetry.left;
+        doc["right"] = telemetry.right;
+        doc["heading"] = telemetry.heading;
+        doc["compass_heading"] = telemetry.compassHeading;
         doc["gyro_rate"] = telemetry.gyroRate;
-        doc["pos_x"]    = telemetry.posX;
-        doc["pos_y"]    = telemetry.posY;
+        doc["pos_x"] = telemetry.posX;
+        doc["pos_y"] = telemetry.posY;
         doc["distance"] = telemetry.distance;
-        doc["enc_l"]    = telemetry.encL;
-        doc["enc_r"]    = telemetry.encR;
-        doc["battery"]  = telemetry.battery;
-        doc["state"]    = telemetry.avoidState;
+        doc["enc_l"] = telemetry.encL;
+        doc["enc_r"] = telemetry.encR;
+        doc["battery"] = telemetry.battery;
+        doc["state"]  = telemetry.avoidState;
         doc["path_length"] = telemetry.pathLen;
-        doc["auto"]     = telemetry.autoMode;
+        doc["auto"]   = telemetry.autoMode;
         doc["has_target"] = telemetry.hasTarget;
         doc["target_reached"] = telemetry.targetReached;
         doc["backtracking"] = telemetry.backtracking;
-        doc["grid_x"]   = telemetry.gridX;
-        doc["grid_y"]   = telemetry.gridY;
+        doc["grid_x"] = telemetry.gridX;
+        doc["grid_y"] = telemetry.gridY;
         doc["target_x"] = telemetry.targetGX;
         doc["target_y"] = telemetry.targetGY;
         doc["target_wx"] = telemetry.targetWX;
         doc["target_wy"] = telemetry.targetWY;
-        doc["crumbs"]   = telemetry.crumbs;
-        doc["mpu_ok"]   = telemetry.mpuOk;
-        doc["accel_x"]  = telemetry.accelX;
-        doc["accel_y"]  = telemetry.accelY;
-        doc["accel_z"]  = telemetry.accelZ;
-        doc["gyro_x"]   = telemetry.gyroXr;
-        doc["gyro_y"]   = telemetry.gyroYr;
-        doc["mpu_temp"] = telemetry.mpuTemp;
-        doc["wifi_rssi"] = WiFi.RSSI();
-        doc["free_heap"] = ESP.getFreeHeap();
-        doc["uptime"]   = millis() / 1000;
-        doc["debug_mode"] = (bool)DEBUG_MODE;
+        doc["crumbs"] = telemetry.crumbs;
+        doc["compass_ok"] = telemetry.compassOk;
+        doc["mpu_ok"] = telemetry.mpuOk;
         xSemaphoreGive(stateMutex);
     }
 
-    if (includeDebug) {
-        char snapshot[Debug::MAX_LOGS][Debug::MAX_MSG_LEN];
-        int n = 0;
-        portENTER_CRITICAL(&Debug::mux);
-        if (Debug::logCount > 0) {
-            int start = (Debug::logHead - Debug::logCount + Debug::MAX_LOGS) % Debug::MAX_LOGS;
-            for (int i = 0; i < Debug::logCount; i++) {
-                strncpy(snapshot[n], Debug::logs[(start + i) % Debug::MAX_LOGS], Debug::MAX_MSG_LEN);
-                snapshot[n][Debug::MAX_MSG_LEN - 1] = '\0';
-                n++;
-            }
-            Debug::logCount = 0;
-        }
-        portEXIT_CRITICAL(&Debug::mux);
-
-        if (n > 0) {
-            JsonArray dbg = doc["debug"].to<JsonArray>();
-            for (int i = 0; i < n; i++) dbg.add(snapshot[i]);
-        }
-    }
+    doc["wifi_rssi"]  = WiFi.RSSI();
+    doc["free_heap"]  = ESP.getFreeHeap();
+    doc["uptime"]     = millis() / 1000;
+    doc["debug_mode"] = (bool)DEBUG_MODE;
 
     String payload;
     serializeJson(doc, payload);
-    int code = http.POST(payload);
+    http.POST(payload);
+    http.end();
+}
 
+// ============================================
+// FETCH + PROCESS COMMAND
+// ============================================
+void fetchCommand() {
+    HTTPClient http;
+    httpBegin(http, "/api/robot/command");
+
+    int code = http.GET();
     if (code == 200) {
-        JsonDocument resp;
-        if (!deserializeJson(resp, http.getString())) {
-            const char* cmd = resp["cmd"] | "none";
+        JsonDocument doc;
+        if (!deserializeJson(doc, http.getString())) {
+            const char* cmd = doc["cmd"] | "none";
             if (strcmp(cmd, "none") != 0) {
                 portENTER_CRITICAL(&cmdMux);
                 strncpy(pendingCmd.cmd, cmd, 19);
                 pendingCmd.cmd[19] = '\0';
-                pendingCmd.x = resp["x"] | 0.0f;
-                pendingCmd.y = resp["y"] | 0.0f;
+                pendingCmd.x = doc["x"] | 0.0f;
+                pendingCmd.y = doc["y"] | 0.0f;
                 pendingCmd.pending = true;
                 portEXIT_CRITICAL(&cmdMux);
             }
@@ -403,10 +339,8 @@ void syncWithServer(bool includeTelemetry, bool includeDebug) {
     http.end();
 }
 
-// ============================================
-// PROCESS COMMAND (Core 1)
-// ============================================
 void processCommand() {
+    // Snapshot under lock so Core 0 can't half-write while we read
     char cmdBuf[20];
     float cmdX, cmdY;
     portENTER_CRITICAL(&cmdMux);
@@ -417,70 +351,19 @@ void processCommand() {
     portEXIT_CRITICAL(&cmdMux);
     const char* cmd = cmdBuf;
 
-    if (strcmp(cmd, "forward") == 0) {
-        autonomousMode = false;
-        userIntent = INTENT_FORWARD;
-        motors.forward(SPEED_MEDIUM);
-        Debug::log("[CMD] forward");
-    }
-    else if (strcmp(cmd, "back") == 0) {
-        autonomousMode = false;
-        userIntent = INTENT_BACK;
-        emergencyBrake = false;
-        avoidance.state = AVOID_IDLE;
-        motors.backward(SPEED_MEDIUM);
-        Debug::log("[CMD] back");
-    }
-    else if (strcmp(cmd, "left") == 0) {
-        autonomousMode = false;
-        userIntent = INTENT_LEFT;
-        emergencyBrake = false;
-        avoidance.state = AVOID_IDLE;
-        motors.turnLeft(SPEED_TURN);
-        Debug::log("[CMD] left");
-    }
-    else if (strcmp(cmd, "right") == 0) {
-        autonomousMode = false;
-        userIntent = INTENT_RIGHT;
-        emergencyBrake = false;
-        avoidance.state = AVOID_IDLE;
-        motors.turnRight(SPEED_TURN);
-        Debug::log("[CMD] right");
-    }
-    else if (strcmp(cmd, "stop") == 0) {
-        autonomousMode = false;
-        userIntent = INTENT_NONE;
-        emergencyBrake = false;
-        avoidance.state = AVOID_IDLE;
-        motors.stop();
-        Debug::log("[CMD] stop");
-    }
-    else if (strcmp(cmd, "auto") == 0) {
-        autonomousMode = true;
-        userIntent = INTENT_NONE;
-        emergencyBrake = false;
-        Debug::log("[CMD] auto");
-    }
+    if (strcmp(cmd, "forward") == 0)      { autonomousMode = false; motors.forward(SPEED_MEDIUM); }
+    else if (strcmp(cmd, "back") == 0)    { autonomousMode = false; motors.backward(SPEED_MEDIUM); }
+    else if (strcmp(cmd, "left") == 0)    { autonomousMode = false; motors.turnLeft(SPEED_TURN); }
+    else if (strcmp(cmd, "right") == 0)   { autonomousMode = false; motors.turnRight(SPEED_TURN); }
+    else if (strcmp(cmd, "stop") == 0)    { autonomousMode = false; motors.stop(); }
+    else if (strcmp(cmd, "auto") == 0)    { autonomousMode = true; }
     else if (strcmp(cmd, "set_target") == 0) {
         pathfinder.setTargetWorld(cmdX, cmdY);
         autonomousMode = true;
-        userIntent = INTENT_NONE;
         Debug::logf("[CMD] Target: X=%.0f Y=%.0f", cmdX, cmdY);
     }
-    else if (strcmp(cmd, "backtrack") == 0) {
-        pathfinder.startBacktrack();
-        autonomousMode = true;
-        userIntent = INTENT_NONE;
-        Debug::log("[CMD] backtrack");
-    }
-    else if (strcmp(cmd, "reset") == 0) {
-        encoder.resetPosition();
-        pathfinder.begin();
-        autonomousMode = true;
-        userIntent = INTENT_NONE;
-        emergencyBrake = false;
-        Debug::log("[CMD] reset");
-    }
+    else if (strcmp(cmd, "backtrack") == 0) { pathfinder.startBacktrack(); autonomousMode = true; }
+    else if (strcmp(cmd, "reset") == 0)   { encoder.resetPosition(); pathfinder.begin(); autonomousMode = true; }
     else if (strncmp(cmd, "test_", 5) == 0) { runTest(cmd); }
 }
 
@@ -533,25 +416,63 @@ void setupWiFi() {
 }
 
 // ============================================
+// DEBUG FLUSH
+// ============================================
+void debugFlush() {
+    // Snapshot under lock so Core 1 can keep logging while we POST.
+    char snapshot[Debug::MAX_LOGS][Debug::MAX_MSG_LEN];
+    int n = 0;
+    portENTER_CRITICAL(&Debug::mux);
+    if (Debug::logCount > 0) {
+        int start = (Debug::logHead - Debug::logCount + Debug::MAX_LOGS) % Debug::MAX_LOGS;
+        for (int i = 0; i < Debug::logCount; i++) {
+            strncpy(snapshot[n], Debug::logs[(start + i) % Debug::MAX_LOGS], Debug::MAX_MSG_LEN);
+            snapshot[n][Debug::MAX_MSG_LEN - 1] = '\0';
+            n++;
+        }
+        Debug::logCount = 0;
+    }
+    portEXIT_CRITICAL(&Debug::mux);
+
+    if (n == 0) return;
+
+    HTTPClient http;
+    httpBegin(http, "/api/robot/debug");
+    http.addHeader("Content-Type", "application/json");
+
+    JsonDocument doc;
+    JsonArray arr = doc["logs"].to<JsonArray>();
+    for (int i = 0; i < n; i++) arr.add(snapshot[i]);
+
+    String payload;
+    serializeJson(doc, payload);
+    http.POST(payload);
+    http.end();
+}
+
+// ============================================
 // HARDWARE TESTS
 // ============================================
 void runTest(const char* test) {
     autonomousMode = false;
     motors.stop();
+
     Debug::logf("===== %s =====", test);
 
-    if (strcmp(test, "test_all") == 0)              testAll();
-    else if (strcmp(test, "test_i2c") == 0)         testI2C();
-    else if (strcmp(test, "test_ultrasonic") == 0)   testUltrasonic();
-    else if (strcmp(test, "test_servo") == 0)        testServo();
-    else if (strcmp(test, "test_mpu") == 0)          testMPU6050();
-    else if (strcmp(test, "test_compass") == 0)      testCompass();
-    else if (strcmp(test, "test_motors") == 0)       testMotors();
-    else if (strcmp(test, "test_encoder") == 0)      testEncoders();
-    else if (strcmp(test, "test_battery") == 0)      testBattery();
-    else                                             Debug::logf("[TEST] Unknown: %s", test);
+    if (strcmp(test, "test_all") == 0)         testAll();
+    else if (strcmp(test, "test_i2c") == 0)    testI2C();
+    else if (strcmp(test, "test_ultrasonic") == 0) testUltrasonic();
+    else if (strcmp(test, "test_servo") == 0)  testServo();
+    else if (strcmp(test, "test_mpu") == 0)    testMPU6050();
+    else if (strcmp(test, "test_compass") == 0) testCompass();
+    else if (strcmp(test, "test_motors") == 0) testMotors();
+    else if (strcmp(test, "test_encoder") == 0) testEncoders();
+    else if (strcmp(test, "test_battery") == 0) testBattery();
+    else                                        Debug::logf("[TEST] Unknown: %s", test);
 
     Debug::log("===== test done =====");
+    // Don't call debugFlush() here — it does HTTP from Core 1 and races
+    // Core 0's wifiTask. Core 0 will pick up the buffer within 500ms.
 }
 
 void testI2C() {
@@ -570,21 +491,33 @@ void testI2C() {
 }
 
 void testUltrasonic() {
+    // Five readings so a single bad pulse doesn't make the test look broken
     int errors = 0;
     for (int i = 0; i < 5; i++) {
-        float d = sensors.readUltrasonic();
-        if (d >= 999) { Debug::logf("[US %d/5] no echo", i + 1); errors++; }
-        else          { Debug::logf("[US %d/5] %.1f cm", i + 1, d); }
+        digitalWrite(US_TRIG, LOW); delayMicroseconds(2);
+        digitalWrite(US_TRIG, HIGH); delayMicroseconds(10);
+        digitalWrite(US_TRIG, LOW);
+        unsigned long dur = pulseIn(US_ECHO, HIGH, 30000);
+        if (dur == 0) { Debug::logf("[US %d/5] no echo", i + 1); errors++; }
+        else          { Debug::logf("[US %d/5] %.1f cm", i + 1, dur / 58.0); }
         delay(80);
     }
-    if (errors == 5)      Debug::log("[US] FAIL: sensor unwired or broken");
+    if (errors == 5)      Debug::log("[US] FAIL: nothing in front, or sensor unwired");
     else if (errors > 0)  Debug::logf("[US] %d/5 misses (acceptable)", errors);
     else                  Debug::log("[US] OK");
 }
 
 void testServo() {
-    Debug::log("[SERVO] Servo is controlled by Core 0 — visual check only");
-    Debug::log("[SERVO] Watch if servo sweeps continuously");
+    if (!sensors.servoReady) {
+        Debug::log("[SERVO] FAIL: attach() returned false at boot — servo never initialized");
+        Debug::log("[SERVO] Check: 5V power, signal wire on GPIO 9, common GND");
+        return;
+    }
+    Debug::log("[SERVO] -> CENTER (90)"); sensors.sweepServo.write(SERVO_CENTER); delay(600);
+    Debug::log("[SERVO] -> LEFT (160)");  sensors.sweepServo.write(SERVO_LEFT);   delay(600);
+    Debug::log("[SERVO] -> RIGHT (20)");  sensors.sweepServo.write(SERVO_RIGHT);  delay(600);
+    Debug::log("[SERVO] -> CENTER (90)"); sensors.sweepServo.write(SERVO_CENTER); delay(400);
+    Debug::log("[SERVO] OK (if you saw it move)");
 }
 
 void testMPU6050() {
@@ -598,12 +531,15 @@ void testMPU6050() {
 }
 
 void testCompass() {
-    Debug::log("[TEST] Compass (QMC5883L) — hardware removed");
+    Debug::log("[TEST] Compass (QMC5883L)...");
     Wire.beginTransmission(COMPASS_ADDR);
-    if (Wire.endTransmission() == 0)
-        Debug::logf("[COMPASS] Device found at 0x%02X (unexpected)", COMPASS_ADDR);
-    else
-        Debug::log("[COMPASS] Not found (expected — removed)");
+    if (Wire.endTransmission() != 0) {
+        Debug::logf("[COMPASS] ERROR: No response at 0x%02X", COMPASS_ADDR);
+        return;
+    }
+    float h = sensors.compassHeading;
+    Debug::logf("[COMPASS] Heading: %.1f deg", h);
+    Debug::log(h >= 0 ? "[COMPASS] OK" : "[COMPASS] WARNING: no data");
 }
 
 void testMotors() {
@@ -643,6 +579,6 @@ void testBattery() {
 void testAll() {
     Debug::log("========== FULL HARDWARE TEST ==========");
     testBattery(); testI2C(); testMPU6050(); testCompass();
-    testUltrasonic(); testMotors(); testEncoders();
+    testUltrasonic(); testServo(); testMotors(); testEncoders();
     Debug::log("========== TEST COMPLETE ==========");
 }

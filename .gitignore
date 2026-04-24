@@ -9,13 +9,6 @@ src/secrets.h
 # Claude Code local settings
 .claude/
 
-# Diagnostic logs
-server/logs/
-
-# Cloudflare tunnel state
-server/.tunnel_info
-server/.cloudflared.log
-
 # VS Code
 .vscode/
 

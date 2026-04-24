@@ -8,13 +8,13 @@
 // ============================================
 
 // --- TB6612FNG Motor Driver ---
-#define MOTOR_L_AIN1  4    // Left direction 1
+#define MOTOR_L_AIN1  6    // Left direction 1
 #define MOTOR_L_AIN2  5    // Left direction 2
-#define MOTOR_L_PWM   6    // Left speed (LEDC)
-#define MOTOR_R_BIN1  7    // Right direction 1
-#define MOTOR_R_BIN2  15   // Right direction 2
-#define MOTOR_R_PWM   16   // Right speed (LEDC)
-#define MOTOR_STBY    17   // Standby (HIGH=active)
+#define MOTOR_L_PWM   4    // Left speed (LEDC)
+#define MOTOR_R_BIN1  15    // Right direction 1
+#define MOTOR_R_BIN2  16   // Right direction 2
+#define MOTOR_R_PWM   17   // Right speed (LEDC)
+#define MOTOR_STBY    7   // Standby (HIGH=active)
 
 // LEDC PWM config
 #define PWM_FREQ      5000  // 5kHz
@@ -77,17 +77,11 @@
 // --- Timing ---
 #define SCAN_INTERVAL_MS    50    // 20Hz sensor loop (ESP32 can handle it)
 #define PATH_UPDATE_MS      500
-
-// --- Continuous Sweep (radar-like scanning) ---
-#define SWEEP_START_ANGLE   SERVO_RIGHT   // 20°
-#define SWEEP_END_ANGLE     SERVO_LEFT    // 160°
-#define SWEEP_STEP_DEG      20
-#define SWEEP_STEPS         ((SWEEP_END_ANGLE - SWEEP_START_ANGLE) / SWEEP_STEP_DEG + 1)  // 8
-#define SERVO_SETTLE_MS     80    // time for servo to reach position
+#define SERVO_SWEEP_MS      120
 
 // --- Heading ---
 #define GYRO_DEADZONE       0.3   // deg/s - ignore below this
-#define COMPASS_ALPHA       0.02  // complementary filter weight (unused, compass removed)
+#define COMPASS_ALPHA       0.02  // complementary filter weight (0.02 = slow compass correction)
 
 // --- Encoder ---
 #define TICKS_PER_REV       20
@@ -98,14 +92,12 @@
 // --- Breadcrumbs ---
 #define MAX_CRUMBS          100    // 20m range (every 20cm)
 
-// --- WiFi / server ---
+// --- WiFi / server / token ---
 // All deployment-specific values live in secrets.h (gitignored).
 // Copy secrets.example.h -> secrets.h and fill it in before building.
 #include "secrets.h"
 
-#define SYNC_INTERVAL_MS      100   // command poll rate (fast)
-#define TELEMETRY_INTERVAL_MS 1000  // full telemetry push rate (slow)
-#define HTTP_TIMEOUT_MS       200   // max wait for server response
+#define REPORT_INTERVAL_MS  200
 
 // --- Debug ---
 #define DEBUG_MODE    1

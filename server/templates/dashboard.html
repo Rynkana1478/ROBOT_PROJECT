@@ -6,443 +6,686 @@
     <title>Robot Dashboard</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body { height: 100vh; overflow: hidden; }
+        html, body {
+            overflow-x: hidden;
+            max-width: 100vw;
+        }
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: #F3EDE5; color: #3D3929;
-            display: flex; flex-direction: column;
-            height: 100vh; padding: 6px; gap: 6px;
+            background: #F3EDE5;
+            color: #3D3929;
+            padding: 16px;
+            line-height: 1.5;
         }
 
-        /* HEADER */
+        /* Header */
         header {
-            display: flex; align-items: center; gap: 8px;
-            flex-shrink: 0; padding: 4px 8px;
-            background: #FFFCF8; border: 1px solid #E8E0D4; border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
         .logo-icon {
-            width: 26px; height: 26px; background: #C96442; border-radius: 6px;
-            display: flex; align-items: center; justify-content: center;
-            color: white; font-weight: 700; font-size: 12px; flex-shrink: 0;
+            width: 32px; height: 32px;
+            background: #C96442;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 14px;
         }
-        header h1 { font-size: 0.85em; font-weight: 600; color: #2D2B28; white-space: nowrap; }
-        .header-sub { font-size: 0.6em; color: #A09685; }
-        .header-spacer { flex: 1; }
-        .sys-stats { display: flex; gap: 10px; font-size: 0.6em; color: #A09685; }
-        .conn-badge { padding: 3px 10px; border-radius: 12px; font-size: 0.65em; font-weight: 500; flex-shrink: 0; }
+        header h1 {
+            font-size: 1.2em;
+            font-weight: 600;
+            color: #2D2B28;
+        }
+        .conn-badge {
+            padding: 5px 14px;
+            border-radius: 20px;
+            font-size: 0.78em;
+            font-weight: 500;
+            letter-spacing: 0.02em;
+        }
         .conn-ok { background: #E6F4EA; color: #1B7D3E; }
         .conn-off { background: #FCE8E6; color: #C5221F; }
 
-        /* MAIN GRID — matches wireframe */
-        .main {
+        /* Layout */
+        .layout {
             display: grid;
-            grid-template-columns: 1fr auto 1fr;
-            gap: 6px;
-            flex: 1; min-height: 0;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 16px;
         }
 
+        /* Card */
         .card {
-            background: #FFFCF8; border: 1px solid #E8E0D4;
-            border-radius: 8px; padding: 7px 8px;
+            background: #FFFCF8;
+            border: 1px solid #E8E0D4;
+            border-radius: 12px;
+            padding: 18px;
         }
-        .card-title {
-            font-size: 0.6em; font-weight: 600; color: #8B7E6A;
-            text-transform: uppercase; letter-spacing: 0.05em;
-            margin-bottom: 4px;
+        .card h2 {
+            font-size: 0.82em;
+            font-weight: 600;
+            color: #8B7E6A;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 14px;
         }
 
-        /* LEFT COLUMN: Status (top) + Name/Profile + Controller (bottom) */
-        .left-col {
-            grid-column: 1; grid-row: 1;
-            display: flex; flex-direction: column; gap: 5px;
-            min-height: 0; overflow-y: auto;
+        /* Stats */
+        .stat-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
         }
-        .tbl { width: 100%; border-collapse: collapse; font-size: 0.7em; }
-        .tbl td { padding: 2px 3px; border-bottom: 1px solid #EDE7DD; font-variant-numeric: tabular-nums; }
-        .tbl .lbl { color: #A09685; font-size: 0.85em; width: 48px; }
-        .tbl .val { font-weight: 600; color: #3D3929; text-align: right; }
-        .tbl .val3 { font-weight: 600; color: #3D3929; text-align: center; font-size: 0.92em; }
-        .tbl-head {
-            font-size: 0.55em; font-weight: 600; color: #B8AD9E;
-            text-transform: uppercase; letter-spacing: 0.04em;
-            padding-top: 4px;
+        .stat {
+            background: #F7F3ED;
+            padding: 10px 12px;
+            border-radius: 8px;
         }
-        .dist-ok { color: #1B7D3E !important; }
-        .dist-warn { color: #D4923A !important; }
-        .dist-danger { color: #C5221F !important; }
+        .stat .label {
+            font-size: 0.68em;
+            font-weight: 500;
+            color: #A09685;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .stat .value {
+            font-size: 1.05em;
+            font-weight: 600;
+            color: #3D3929;
+            margin-top: 2px;
+            font-variant-numeric: tabular-nums;
+        }
+        .stat.wide { grid-column: span 2; }
 
-        .name-strip {
-            display: flex; gap: 4px; align-items: center; flex-shrink: 0;
-        }
-        .name-strip input {
-            flex: 1; padding: 4px 6px; border: 1px solid #E0D6CA;
-            border-radius: 5px; background: #FFFCF8; font-family: inherit;
-            font-size: 0.72em; color: #3D3929;
-        }
-        .name-strip input:focus { outline: none; border-color: #C96442; }
+        .dist-ok { color: #1B7D3E; }
+        .dist-warn { color: #D4923A; }
+        .dist-danger { color: #C5221F; }
+        .mode-auto { color: #1A73C4; }
+        .mode-manual { color: #C96442; }
 
-        .control-pad {
-            display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr;
-            gap: 3px; max-width: 150px; margin: 0 auto;
-        }
+        /* Buttons */
         .btn {
-            padding: 5px 6px; border: 1px solid #E0D6CA; background: #FFFCF8;
-            color: #3D3929; font-family: inherit; font-size: 0.72em; font-weight: 500;
-            cursor: pointer; border-radius: 6px; transition: all 0.1s;
-            text-align: center;
+            padding: 10px 16px;
+            border: 1px solid #E0D6CA;
+            background: #FFFCF8;
+            color: #3D3929;
+            font-family: inherit;
+            font-size: 0.85em;
+            font-weight: 500;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.15s;
         }
-        .btn:hover { background: #F3EDE5; }
+        .btn:hover { background: #F3EDE5; border-color: #C9BFB0; }
         .btn:active { background: #E8E0D4; transform: scale(0.97); }
-        .btn-primary { background: #C96442; color: white; border-color: #C96442; }
-        .btn-primary:hover { background: #B55838; }
-        .btn-accent { background: #1A73C4; color: white; border-color: #1A73C4; }
-        .btn-accent:hover { background: #1565B0; }
-        .btn-secondary { background: #EBE5DC; border-color: #D8CFBF; color: #5C5344; }
-        .control-pad .btn {
-            padding: 8px 2px; font-weight: 600; font-size: 0.72em;
-            background: #EBE5DC; border-color: #D8CFBF; border-radius: 7px;
+
+        .btn-primary {
+            background: #C96442;
+            color: white;
+            border-color: #C96442;
         }
+        .btn-primary:hover { background: #B55838; border-color: #B55838; }
+        .btn-primary:active { background: #A04E30; }
+
+        .btn-secondary {
+            background: #EBE5DC;
+            border-color: #D8CFBF;
+            color: #5C5344;
+        }
+        .btn-secondary:hover { background: #E0D6CA; }
+
+        .btn-danger {
+            background: #FFFCF8;
+            color: #C5221F;
+            border-color: #F0C6C3;
+        }
+        .btn-danger:hover { background: #FCE8E6; }
+        .btn-danger:active { background: #F5D3D0; }
+
+        .btn-accent {
+            background: #1A73C4;
+            color: white;
+            border-color: #1A73C4;
+        }
+        .btn-accent:hover { background: #1565B0; }
+
+        .btn-row { display: flex; gap: 8px; }
+        .btn-row .btn { flex: 1; text-align: center; }
+
+        /* Destination */
+        .dest-form { display: flex; flex-direction: column; gap: 10px; }
+        .input-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .input-group label {
+            font-size: 0.82em;
+            font-weight: 500;
+            color: #8B7E6A;
+            width: 24px;
+        }
+        .input-group input {
+            flex: 1;
+            padding: 9px 12px;
+            border: 1px solid #E0D6CA;
+            border-radius: 8px;
+            background: #FFFCF8;
+            color: #3D3929;
+            font-family: inherit;
+            font-size: 0.9em;
+            font-variant-numeric: tabular-nums;
+        }
+        .input-group input:focus { outline: none; border-color: #C96442; box-shadow: 0 0 0 3px rgba(201,100,66,0.12); }
+        .input-group .unit { font-size: 0.78em; color: #A09685; }
+
+        .info-box {
+            margin-top: 10px;
+            padding: 10px 12px;
+            background: #F7F3ED;
+            border-radius: 8px;
+            font-size: 0.82em;
+            color: #8B7E6A;
+        }
+        .info-box span { color: #C96442; font-weight: 500; }
+        .info-box .reached { color: #1B7D3E; }
+        .info-box .tracking { color: #D4923A; }
+
+        /* D-Pad */
+        .control-pad {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            grid-template-rows: 1fr 1fr 1fr;
+            gap: 6px;
+            max-width: 210px;
+            margin: 0 auto 14px;
+        }
+        .control-pad .btn {
+            padding: 16px 8px;
+            text-align: center;
+            font-size: 0.9em;
+            font-weight: 600;
+            border-radius: 10px;
+            background: #EBE5DC;
+            border-color: #D8CFBF;
+        }
+        .control-pad .btn:hover { background: #E0D6CA; }
+        .control-pad .btn:active { background: #D0C6B8; }
         .pad-fwd { grid-column: 2; grid-row: 1; }
         .pad-left { grid-column: 1; grid-row: 2; }
-        .pad-stop { grid-column: 2; grid-row: 2; background: #FCE8E6; border-color: #F0C6C3; color: #C5221F; }
+        .pad-stop { grid-column: 2; grid-row: 2; }
         .pad-right { grid-column: 3; grid-row: 2; }
         .pad-back { grid-column: 2; grid-row: 3; }
-        .action-btns { display: flex; gap: 3px; flex-wrap: wrap; margin-top: 4px; }
-        .action-btns .btn { flex: 1; min-width: 50px; font-size: 0.65em; padding: 4px 2px; }
-        .hint { font-size: 0.52em; color: #A09685; text-align: center; margin-top: 3px; line-height: 1.5; }
+        .pad-stop.btn-danger { background: #FCE8E6; border-color: #F0C6C3; }
+
+        .action-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            max-width: 210px;
+            margin: 0 auto;
+        }
+        .action-buttons .btn { width: 100%; text-align: center; }
+
+        .hint {
+            margin-top: 12px;
+            font-size: 0.75em;
+            color: #A09685;
+            text-align: center;
+            line-height: 1.7;
+        }
         .hint kbd {
-            background: #EBE5DC; padding: 1px 3px; border-radius: 3px;
-            font-size: 0.9em; font-family: inherit; border: 1px solid #D8CFBF;
+            background: #EBE5DC;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            font-family: inherit;
+            border: 1px solid #D8CFBF;
         }
 
-        .test-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
-        .test-grid .btn { font-size: 0.58em; padding: 3px 2px; }
-        .btn-test-all { grid-column: span 2; background: #C96442; color: white; border-color: #C96442; font-weight: 600; }
-        .btn-test-all:hover { background: #B55838; }
-
-        /* CENTER: Map (top, square) + Log (bottom) */
-        .center-col {
-            grid-column: 2; grid-row: 1;
-            display: flex; flex-direction: column; gap: 5px;
-            min-height: 0;
-        }
-        .map-area {
-            flex: 1; min-height: 0;
-            display: flex; align-items: center; justify-content: center;
-        }
-        .map-inner {
-            position: relative;
-        }
+        /* Grid map */
+        .grid-map-container { margin-top: 12px; }
         canvas#gridMap {
-            width: 100%; height: 100%;
-            border: 1px solid #D8CFBF; border-radius: 6px;
-            background: #F7F3ED; cursor: crosshair;
+            border: 1px solid #E0D6CA;
+            border-radius: 8px;
+            width: 100%;
             image-rendering: pixelated;
+            cursor: crosshair;
         }
-        .map-bar {
-            display: flex; justify-content: space-between; align-items: center;
-            font-size: 0.6em; color: #A09685; padding: 2px 4px; flex-shrink: 0;
+        .map-legend {
+            display: flex;
+            gap: 14px;
+            margin-top: 6px;
+            font-size: 0.7em;
+            color: #A09685;
         }
-        .map-bar span { color: #C96442; font-weight: 500; }
-        .map-bar .reached { color: #1B7D3E; }
-        .map-bar .tracking { color: #D4923A; }
+        .legend-dot {
+            display: inline-block;
+            width: 8px; height: 8px;
+            border-radius: 3px;
+            margin-right: 4px;
+            vertical-align: middle;
+        }
+        .map-note { font-size: 0.72em; color: #B8AD9E; margin-top: 4px; }
 
-        /* BOTTOM: Debug Log (full width) */
-        .log-section { flex-shrink: 0; }
-        .debug-console {
-            background: #2D2B28; border: 1px solid #444; border-radius: 6px;
-            padding: 5px 7px; height: 110px; overflow-y: auto;
-            font-family: 'SF Mono', 'Consolas', 'Menlo', monospace;
-            font-size: 0.6em; line-height: 1.4; color: #C9BFB0;
+        /* AI Panel */
+        .ai-section {
+            margin-top: 16px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            overflow: hidden;
         }
-        .debug-console .log-line { white-space: pre-wrap; word-break: break-all; }
-        .log-error { color: #EF9A9A; }
-        .log-warn { color: #FFD699; }
-        .log-test { color: #90CAF9; }
-        .log-ok { color: #A5D6A7; }
-        .log-cmd { color: #CE93D8; }
-        .log-header {
-            display: flex; justify-content: space-between; align-items: center;
-            margin-bottom: 2px;
+        .ai-input-area {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
         }
-        .clear-btn { font-size: 0.55em; color: #A09685; cursor: pointer; border: none; background: none; }
-        .clear-btn:hover { color: #5C5344; }
-
-        /* RIGHT COLUMN: AI Input/Queue (top) + Chat Log (bottom) */
-        .right-col {
-            grid-column: 3; grid-row: 1;
-            display: flex; flex-direction: column; gap: 5px;
-            min-height: 0;
+        .ai-input-area input {
+            flex: 1;
+            min-width: 0;
+            padding: 10px 12px;
+            border: 1px solid #E0D6CA;
+            border-radius: 8px;
+            background: #FFFCF8;
+            color: #3D3929;
+            font-family: inherit;
+            font-size: 0.9em;
         }
-
-        .ai-section { display: flex; flex-direction: column; gap: 4px; }
-        .ai-input-row { display: flex; gap: 3px; align-items: center; }
-        .ai-input-row input[type="text"] {
-            flex: 1; min-width: 0; padding: 6px 7px;
-            border: 1px solid #E0D6CA; border-radius: 6px;
-            background: #FFFCF8; color: #3D3929;
-            font-family: inherit; font-size: 0.72em;
-        }
-        .ai-input-row input:focus { outline: none; border-color: #C96442; box-shadow: 0 0 0 2px rgba(201,100,66,0.12); }
-        .ai-input-row select {
-            padding: 4px 2px; font-size: 0.62em; border: 1px solid #E0D6CA;
-            border-radius: 5px; background: #FFFCF8; font-family: inherit;
-            width: 38px; flex-shrink: 0;
-        }
-        .ai-send-row { display: flex; gap: 3px; }
-        .ai-send-row .btn { flex: 1; }
+        .ai-input-area input:focus { outline: none; border-color: #C96442; box-shadow: 0 0 0 3px rgba(201,100,66,0.12); }
         .btn-voice {
-            width: 28px; min-width: 28px; height: 28px; border-radius: 50%; padding: 0;
-            display: flex; align-items: center; justify-content: center;
-            font-size: 0.85em; background: #EBE5DC; border: 1px solid #D8CFBF;
-            cursor: pointer; flex-shrink: 0;
+            width: 44px;
+            min-width: 44px;
+            border-radius: 50%;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2em;
+            background: #EBE5DC;
+            border: 1px solid #D8CFBF;
         }
         .btn-voice.listening {
-            background: #C96442; color: white; border-color: #C96442;
+            background: #C96442;
+            color: white;
+            border-color: #C96442;
             animation: pulse 1s infinite;
         }
         @keyframes pulse {
             0%, 100% { box-shadow: 0 0 0 0 rgba(201,100,66,0.3); }
-            50% { box-shadow: 0 0 0 6px rgba(201,100,66,0); }
+            50% { box-shadow: 0 0 0 8px rgba(201,100,66,0); }
         }
-        .ai-status-line {
-            font-size: 0.55em; color: #A09685; display: flex; gap: 6px; align-items: center;
+        .ai-status {
+            font-size: 0.75em;
+            color: #A09685;
+            margin-top: 6px;
+            display: flex;
+            gap: 12px;
         }
-        .dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; margin-right: 2px; vertical-align: middle; }
+        .ai-status .dot {
+            display: inline-block;
+            width: 7px; height: 7px;
+            border-radius: 50%;
+            margin-right: 4px;
+            vertical-align: middle;
+        }
         .dot-on { background: #1B7D3E; }
         .dot-off { background: #C5221F; }
-        .ai-queue-badge {
-            display: inline-block; background: #D4923A; color: white;
-            font-size: 0.85em; padding: 1px 5px; border-radius: 8px; font-weight: 600;
-        }
-
-        .chat-section { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-        .chat-box {
-            flex: 1; min-height: 0; overflow-y: auto;
-            padding: 5px;
+        .ai-response {
+            margin-top: 10px;
+            font-size: 0.82em;
         }
         .ai-bubble {
-            padding: 4px 7px; border-radius: 7px; margin-bottom: 3px;
-            line-height: 1.3; font-size: 0.68em;
+            padding: 10px 14px;
+            border-radius: 10px;
+            margin-bottom: 6px;
+            line-height: 1.5;
         }
-        .ai-bubble-user { background: #C96442; color: white; margin-left: 16px; border-bottom-right-radius: 2px; }
-        .ai-bubble-ai { background: #F7F3ED; color: #3D3929; margin-right: 16px; border-bottom-left-radius: 2px; }
-        .ai-bubble-error { background: #FCE8E6; color: #C5221F; margin-right: 16px; }
+        .ai-bubble-user {
+            background: #C96442;
+            color: white;
+            margin-left: 40px;
+            border-bottom-right-radius: 4px;
+        }
+        .ai-bubble-ai {
+            background: #F7F3ED;
+            color: #3D3929;
+            margin-right: 40px;
+            border-bottom-left-radius: 4px;
+        }
+        .ai-bubble-error {
+            background: #FCE8E6;
+            color: #C5221F;
+            margin-right: 40px;
+            border-bottom-left-radius: 4px;
+        }
         .ai-bubble-cmd {
-            background: #E6F4EA; color: #1B7D3E; margin-right: 16px;
-            font-family: 'SF Mono', 'Consolas', monospace; font-size: 0.88em;
+            background: #E6F4EA;
+            color: #1B7D3E;
+            margin-right: 40px;
+            border-bottom-left-radius: 4px;
+            font-family: 'SF Mono', 'Consolas', monospace;
+            font-size: 0.9em;
+        }
+        .ai-meta {
+            font-size: 0.72em;
+            color: #A09685;
+            margin-top: 2px;
+        }
+        .ai-history {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .ai-queue-badge {
+            display: inline-block;
+            background: #D4923A;
+            color: white;
+            font-size: 0.7em;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: 600;
+        }
+
+        @media (max-width: 960px) {
+            .ai-section { grid-template-columns: 1fr; }
+            .ai-input-area { flex-wrap: wrap; }
+            .ai-input-area input[type="text"] { min-width: 100%; flex-basis: 100%; }
+            .ai-bubble { margin-left: 10px; margin-right: 10px; }
+        }
+
+        /* Debug panel */
+        .debug-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 16px;
+            margin-top: 16px;
+        }
+        .debug-console {
+            grid-column: span 2;
+            background: #2D2B28;
+            border: 1px solid #E0D6CA;
+            border-radius: 12px;
+            padding: 12px;
+            font-family: 'SF Mono', 'Consolas', 'Menlo', monospace;
+            font-size: 0.72em;
+            height: 250px;
+            overflow-y: auto;
+            line-height: 1.6;
+            color: #C9BFB0;
+        }
+        .debug-console .log-line { white-space: pre-wrap; word-break: break-all; }
+        .debug-console .log-error { color: #EF9A9A; }
+        .debug-console .log-warn { color: #FFD699; }
+        .debug-console .log-test { color: #90CAF9; }
+        .debug-console .log-ok { color: #A5D6A7; }
+        .debug-console .log-time { color: #7A7265; }
+
+        .test-buttons { display: flex; flex-direction: column; gap: 5px; }
+        .test-buttons .btn {
+            font-size: 0.78em;
+            padding: 8px 12px;
+            text-align: left;
+        }
+        .btn-test-all {
+            background: #C96442;
+            color: white;
+            border-color: #C96442;
+            font-weight: 600;
+        }
+        .btn-test-all:hover { background: #B55838; }
+
+        .sys-stats {
+            display: flex;
+            gap: 12px;
+            margin-top: 8px;
+            font-size: 0.7em;
+            color: #A09685;
         }
 
         /* Responsive */
-        @media (max-width: 900px) {
-            .main { grid-template-columns: 1fr; grid-template-rows: auto; }
-            .left-col, .center-col, .right-col { grid-column: 1; grid-row: auto; max-width: none; }
-            body { height: auto; overflow: auto; }
+        @media (max-width: 960px) {
+            .layout { grid-template-columns: 1fr; }
+            .debug-section { grid-template-columns: 1fr; }
+            .debug-console { grid-column: span 1; }
+        }
+        @media (min-width: 961px) and (max-width: 1200px) {
+            .layout { grid-template-columns: 1fr 1fr; }
         }
     </style>
 </head>
 <body>
-    <!-- HEADER -->
     <header>
-        <div class="logo-icon">R</div>
-        <div>
-            <h1>Robot Full-Self Driving</h1>
-            <div class="header-sub">4WD ESP32-S3 Autonomous Platform</div>
-        </div>
-        <div class="header-spacer"></div>
-        <div class="sys-stats">
-            <span>RSSI <span id="rssi">--</span></span>
-            <span>Heap <span id="heap">--</span></span>
-            <span>Up <span id="uptime">--</span></span>
+        <div class="logo">
+            <div class="logo-icon">R</div>
+            <h1>Robot Dashboard</h1>
         </div>
         <div id="connStatus" class="conn-badge conn-off">Disconnected</div>
     </header>
 
-    <div class="main">
-        <!-- LEFT: Status + Name + Controller -->
-        <div class="left-col">
-            <!-- Status -->
-            <div class="card" style="flex-shrink:0">
-                <div class="card-title">Status</div>
-                <table class="tbl">
-                    <tr><td class="lbl">Front</td><td class="val" id="distFront">--</td></tr>
-                    <tr><td class="lbl">Left</td><td class="val" id="distLeft">--</td></tr>
-                    <tr><td class="lbl">Right</td><td class="val" id="distRight">--</td></tr>
-                </table>
-                <div class="tbl-head">Navigation</div>
-                <table class="tbl">
-                    <tr><td class="lbl">Head</td><td class="val" id="heading">--</td></tr>
-                    <tr><td class="lbl">Pos</td><td class="val" id="position">--</td></tr>
-                    <tr><td class="lbl">Dist</td><td class="val" id="totalDist">--</td></tr>
-                    <tr><td class="lbl">Enc</td><td class="val" id="encTicks">--</td></tr>
-                </table>
-                <div class="tbl-head">System</div>
-                <table class="tbl">
-                    <tr><td class="lbl">Batt</td><td class="val" id="battery">--</td></tr>
-                    <tr><td class="lbl">State</td><td class="val" id="avoidState">--</td></tr>
-                    <tr><td class="lbl">Mode</td><td class="val" id="mode">--</td></tr>
-                    <tr><td class="lbl">Path</td><td class="val" id="pathLen">--</td></tr>
-                    <tr><td class="lbl">Trail</td><td class="val" id="crumbs">--</td></tr>
-                </table>
-                <div class="tbl-head">IMU (MPU6050)</div>
-                <table class="tbl">
-                    <tr><td class="lbl">Accel</td>
-                        <td class="val3" id="accelX">--</td>
-                        <td class="val3" id="accelY">--</td>
-                        <td class="val3" id="accelZ">--</td></tr>
-                    <tr><td class="lbl">Gyro</td>
-                        <td class="val3" id="gyroX">--</td>
-                        <td class="val3" id="gyroY">--</td>
-                        <td class="val3" id="gyroZ">--</td></tr>
-                    <tr><td class="lbl">Temp</td><td class="val" id="mpuTemp" colspan="3">--</td></tr>
-                </table>
-            </div>
-
-            <!-- Name/Profile -->
-            <div class="name-strip">
-                <input type="text" id="userName" placeholder="Your name">
-                <select id="voiceLang" style="padding:3px;font-size:0.65em;border:1px solid #E0D6CA;border-radius:5px;background:#FFFCF8;font-family:inherit;">
-                    <option value="en-US">EN</option>
-                    <option value="th-TH">TH</option>
-                </select>
-            </div>
-
-            <!-- Controller -->
-            <div class="card" style="flex-shrink:0">
-                <div class="card-title">Controller</div>
-                <div class="control-pad">
-                    <button class="btn pad-fwd" onmousedown="sendCmd('forward')" onmouseup="sendCmd('stop')" ontouchstart="sendCmd('forward')" ontouchend="sendCmd('stop')">FWD</button>
-                    <button class="btn pad-left" onmousedown="sendCmd('left')" onmouseup="sendCmd('stop')" ontouchstart="sendCmd('left')" ontouchend="sendCmd('stop')">LEFT</button>
-                    <button class="btn pad-stop" onclick="sendCmd('stop')">STOP</button>
-                    <button class="btn pad-right" onmousedown="sendCmd('right')" onmouseup="sendCmd('stop')" ontouchstart="sendCmd('right')" ontouchend="sendCmd('stop')">RIGHT</button>
-                    <button class="btn pad-back" onmousedown="sendCmd('back')" onmouseup="sendCmd('stop')" ontouchstart="sendCmd('back')" ontouchend="sendCmd('stop')">BACK</button>
+    <div class="layout">
+        <!-- STATUS -->
+        <div class="card">
+            <h2>Sensors</h2>
+            <div class="stat-grid">
+                <div class="stat">
+                    <div class="label">Front</div>
+                    <div class="value" id="distFront">--</div>
                 </div>
-                <div class="action-btns">
-                    <button class="btn btn-accent" onclick="sendCmd('auto')">Auto</button>
-                    <button class="btn btn-secondary" onclick="sendCmd('backtrack')">Back</button>
-                    <button class="btn" onclick="sendCmd('reset')">Reset</button>
+                <div class="stat">
+                    <div class="label">Heading</div>
+                    <div class="value" id="heading">--</div>
                 </div>
-                <div class="hint">
-                    <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> <kbd>Space</kbd> stop
+                <div class="stat">
+                    <div class="label">Left</div>
+                    <div class="value" id="distLeft">--</div>
                 </div>
-            </div>
-
-            <!-- Hardware Tests -->
-            <div class="card" style="flex-shrink:0">
-                <div class="card-title">HW Tests</div>
-                <div class="test-grid">
-                    <button class="btn btn-test-all" onclick="sendCmd('test_all')">Run All</button>
-                    <button class="btn" onclick="sendCmd('test_i2c')">I2C</button>
-                    <button class="btn" onclick="sendCmd('test_mpu')">MPU</button>
-                    <button class="btn" onclick="sendCmd('test_ultrasonic')">Sonic</button>
-                    <button class="btn" onclick="sendCmd('test_servo')">Servo</button>
-                    <button class="btn" onclick="sendCmd('test_motors')">Motors</button>
-                    <button class="btn" onclick="sendCmd('test_encoder')">Enc</button>
-                    <button class="btn" onclick="sendCmd('test_battery')">Batt</button>
-                    <button class="btn" onclick="sendCmd('test_compass')">Comp</button>
+                <div class="stat">
+                    <div class="label">Right</div>
+                    <div class="value" id="distRight">--</div>
+                </div>
+                <div class="stat">
+                    <div class="label">Position</div>
+                    <div class="value" id="position">--</div>
+                </div>
+                <div class="stat">
+                    <div class="label">Grid Cell</div>
+                    <div class="value" id="gridPos">--</div>
+                </div>
+                <div class="stat">
+                    <div class="label">Traveled</div>
+                    <div class="value" id="totalDist">--</div>
+                </div>
+                <div class="stat">
+                    <div class="label">Encoders</div>
+                    <div class="value" id="encTicks">--</div>
+                </div>
+                <div class="stat">
+                    <div class="label">Battery</div>
+                    <div class="value" id="battery">--</div>
+                </div>
+                <div class="stat">
+                    <div class="label">Path</div>
+                    <div class="value" id="pathLen">--</div>
+                </div>
+                <div class="stat">
+                    <div class="label">State</div>
+                    <div class="value" id="avoidState">--</div>
+                </div>
+                <div class="stat">
+                    <div class="label">Crumbs</div>
+                    <div class="value" id="crumbs">--</div>
+                </div>
+                <div class="stat wide">
+                    <div class="label">Mode</div>
+                    <div class="value" id="mode">--</div>
                 </div>
             </div>
         </div>
 
-        <!-- CENTER: Square Map -->
-        <div class="center-col">
-            <div class="map-area">
-                <div class="map-inner" id="mapInner">
-                    <canvas id="gridMap" width="400" height="400"></canvas>
+        <!-- DESTINATION -->
+        <div class="card">
+            <h2>Navigate</h2>
+            <div class="dest-form">
+                <div class="input-group">
+                    <label>X</label>
+                    <input type="number" id="targetX" value="0" step="10">
+                    <span class="unit">cm</span>
+                </div>
+                <div class="input-group">
+                    <label>Y</label>
+                    <input type="number" id="targetY" value="100" step="10">
+                    <span class="unit">cm</span>
+                </div>
+                <div class="btn-row">
+                    <button class="btn btn-primary" onclick="setTarget()">Go To Target</button>
+                    <button class="btn btn-secondary" onclick="sendCmd('backtrack')">Backtrack</button>
                 </div>
             </div>
-            <div class="map-bar">
-                <span>Target: <span id="curTarget">none</span></span>
-                <span id="targetStatus">Click map to set target</span>
+            <div class="info-box">
+                Target: <span id="curTarget">none</span><br>
+                Status: <span id="targetStatus">No target set</span>
+            </div>
+
+            <div class="grid-map-container">
+                <h2 style="margin-top:6px">Map</h2>
+                <canvas id="gridMap" width="240" height="240"></canvas>
+                <div class="map-legend">
+                    <span><span class="legend-dot" style="background:#C96442"></span>Robot</span>
+                    <span><span class="legend-dot" style="background:#1A73C4"></span>Target</span>
+                </div>
+                <div class="map-note">Grid follows the robot. Unlimited range.</div>
             </div>
         </div>
 
-        <!-- RIGHT: AI Input/Queue + Chat Log -->
-        <div class="right-col">
-            <!-- AI Input & Command Queue -->
-            <div class="card ai-section" style="flex-shrink:0">
-                <div class="card-title">AI Command</div>
-                <div class="ai-input-row">
-                    <input type="text" id="aiInput" placeholder="Tell the robot what to do..." onkeydown="if(event.key==='Enter')sendAI()">
-                </div>
-                <div class="ai-send-row">
-                    <button class="btn btn-primary" onclick="sendAI()">Send</button>
-                    <button class="btn-voice" id="voiceBtn" onclick="toggleVoice()">&#127908;</button>
-                </div>
-                <div class="ai-status-line">
-                    <span><span class="dot" id="ollamaDot"></span> <span id="ollamaStatus">...</span></span>
-                    <span id="aiQueueBadge"></span>
-                </div>
+        <!-- CONTROLS -->
+        <div class="card">
+            <h2>Controls</h2>
+            <div class="control-pad">
+                <button class="btn pad-fwd" onmousedown="sendCmd('forward')" onmouseup="sendCmd('stop')" ontouchstart="sendCmd('forward')" ontouchend="sendCmd('stop')">FWD</button>
+                <button class="btn pad-left" onmousedown="sendCmd('left')" onmouseup="sendCmd('stop')" ontouchstart="sendCmd('left')" ontouchend="sendCmd('stop')">LEFT</button>
+                <button class="btn btn-danger pad-stop" onclick="sendCmd('stop')">STOP</button>
+                <button class="btn pad-right" onmousedown="sendCmd('right')" onmouseup="sendCmd('stop')" ontouchstart="sendCmd('right')" ontouchend="sendCmd('stop')">RIGHT</button>
+                <button class="btn pad-back" onmousedown="sendCmd('back')" onmouseup="sendCmd('stop')" ontouchstart="sendCmd('back')" ontouchend="sendCmd('stop')">BACK</button>
             </div>
-
-            <!-- Chat Log -->
-            <div class="card chat-section">
-                <div class="card-title">Chat Log</div>
-                <div class="chat-box" id="aiHistory">
-                    <div class="ai-bubble ai-bubble-ai">Commands and responses appear here.</div>
-                </div>
+            <div class="action-buttons">
+                <button class="btn btn-accent" onclick="sendCmd('auto')">Autonomous</button>
+                <button class="btn btn-secondary" onclick="sendCmd('backtrack')">Backtrack Home</button>
+                <button class="btn" onclick="sendCmd('reset')">Reset Position</button>
+            </div>
+            <div class="hint">
+                <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> drive
+                <kbd>Space</kbd> stop
+                <kbd>B</kbd> backtrack
+                <kbd>R</kbd> reset
             </div>
         </div>
     </div>
 
-    <!-- BOTTOM: Debug Log (full width) -->
-    <div class="log-section">
-        <div class="log-header">
-            <span class="card-title" style="margin:0">Debug Log</span>
-            <button class="clear-btn" onclick="clearLogs()">clear</button>
+    <!-- AI COMMAND -->
+    <div class="ai-section">
+        <div class="card">
+            <h2>AI Command <span id="aiQueueBadge"></span></h2>
+            <div class="ai-input-area" style="margin-bottom:6px">
+                <input type="text" id="userName" placeholder="Name" style="width:80px;flex:none">
+                <select id="voiceLang" class="btn" style="padding:6px;font-size:0.8em;flex:none">
+                    <option value="en-US">EN</option>
+                    <option value="th-TH">TH</option>
+                </select>
+            </div>
+            <div class="ai-input-area">
+                <input type="text" id="aiInput" placeholder="Tell the robot what to do..." onkeydown="if(event.key==='Enter')sendAI()">
+                <button class="btn btn-primary" onclick="sendAI()" style="flex:none">Send</button>
+                <button class="btn btn-voice" id="voiceBtn" onclick="toggleVoice()" style="flex:none">&#127908;</button>
+            </div>
+            <div class="ai-status">
+                <span><span class="dot" id="ollamaDot"></span> <span id="ollamaStatus">Checking...</span></span>
+                <span id="aiMethod"></span>
+            </div>
         </div>
+        <div class="card">
+            <h2>Live Chat (all users see this)</h2>
+            <div class="ai-history" id="aiHistory">
+                <div class="ai-bubble ai-bubble-ai">Anyone can type commands. AI translates for the robot.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- DEBUG -->
+    <div class="debug-section">
         <div class="debug-console" id="debugConsole">
-            <div class="log-line">Waiting for connection...</div>
+            <div class="log-line log-time">Waiting for connection...</div>
+        </div>
+        <div class="card" style="padding:14px">
+            <h2>Hardware Tests</h2>
+            <div class="test-buttons">
+                <button class="btn btn-test-all" onclick="sendCmd('test_all')">Run All Tests</button>
+                <button class="btn" onclick="sendCmd('test_i2c')">I2C Bus Scan</button>
+                <button class="btn" onclick="sendCmd('test_mpu')">MPU6050</button>
+                <button class="btn" onclick="sendCmd('test_compass')">Compass</button>
+                <button class="btn" onclick="sendCmd('test_ultrasonic')">Ultrasonic</button>
+                <button class="btn" onclick="sendCmd('test_servo')">Servo</button>
+                <button class="btn" onclick="sendCmd('test_motors')">Motors</button>
+                <button class="btn" onclick="sendCmd('test_encoder')">Encoders</button>
+                <button class="btn" onclick="sendCmd('test_battery')">Battery</button>
+                <button class="btn" onclick="clearLogs()" style="margin-top:6px;font-size:0.72em;color:#A09685">Clear Logs</button>
+            </div>
+            <div class="sys-stats">
+                <span>RSSI: <span id="rssi">--</span></span>
+                <span>Heap: <span id="heap">--</span></span>
+                <span>Up: <span id="uptime">--</span></span>
+            </div>
         </div>
     </div>
 
 <script>
 const GRID_SIZE = {{ grid_size }};
-let debugLogIndex = 0, chatIndex = 0, lastStatus = {};
+let API_TOKEN = localStorage.getItem('robot_api_token') || '';
+let debugLogIndex = 0;
 
-function apiFetch(url, opts = {}) {
-    return fetch(url, opts);
+function promptForToken(reason) {
+    const t = window.prompt(reason || 'API token:');
+    if (t) {
+        API_TOKEN = t.trim();
+        localStorage.setItem('robot_api_token', API_TOKEN);
+    }
+    return API_TOKEN;
 }
 
-function fetchDashboard() {
-    apiFetch('/api/dashboard?d='+debugLogIndex+'&c='+chatIndex)
-    .then(r => r.json())
-    .then(data => {
-        lastStatus = data.status;
-        updateUI(data.status);
-        if (data.debug.logs && data.debug.logs.length) {
-            const con = document.getElementById('debugConsole');
-            data.debug.logs.forEach(line => {
-                const div = document.createElement('div'); div.className = 'log-line';
-                if (line.includes('ERROR')||line.includes('FAIL')) div.className += ' log-error';
-                else if (line.includes('WARNING')||line.includes('BLOCK')) div.className += ' log-warn';
-                else if (line.includes('[TEST]')||line.includes('=====')) div.className += ' log-test';
-                else if (line.includes(' OK')) div.className += ' log-ok';
-                else if (line.includes('[CMD]')) div.className += ' log-cmd';
-                div.textContent = line; con.appendChild(div);
-            });
-            con.scrollTop = con.scrollHeight;
-            while (con.children.length > 500) con.removeChild(con.firstChild);
+if (!API_TOKEN) promptForToken('Enter robot API token (matches ROBOT_API_TOKEN on the server):');
+
+function apiFetch(url, options = {}) {
+    if (!options.headers) options.headers = {};
+    options.headers['X-Robot-Token'] = API_TOKEN;
+    return fetch(url, options).then(r => {
+        if (r.status === 401) {
+            // Stored token rejected — clear and re-prompt for next call
+            localStorage.removeItem('robot_api_token');
+            API_TOKEN = '';
+            promptForToken('Token rejected. Try again:');
         }
-        debugLogIndex = data.debug.total;
-        if (data.chat.messages && data.chat.messages.length) {
-            data.chat.messages.forEach(m => {
-                if(m.type==='user') addBubble('['+m.user+'] '+m.text,'user');
-                else if(m.type==='ai') addBubble(m.text,'ai');
-                else if(m.type==='cmd') addBubble(m.text,'cmd');
-                else if(m.type==='error') addBubble(m.text,'error');
-            });
-        }
-        chatIndex = data.chat.total;
-    })
-    .catch(() => {
-        document.getElementById('connStatus').textContent = 'Server Error';
-        document.getElementById('connStatus').className = 'conn-badge conn-off';
+        return r;
     });
 }
 
-function updateUI(d) {
+function fetchStatus() {
+    apiFetch('/api/status')
+        .then(r => r.json())
+        .then(updateDashboard)
+        .catch(() => setDisconnected());
+}
+
+function updateDashboard(d) {
     const conn = document.getElementById('connStatus');
     conn.textContent = d.connected ? 'Connected' : 'Disconnected';
     conn.className = 'conn-badge ' + (d.connected ? 'conn-ok' : 'conn-off');
@@ -451,45 +694,40 @@ function updateUI(d) {
     setDist('distLeft', d.left);
     setDist('distRight', d.right);
 
-    document.getElementById('heading').textContent = d.heading.toFixed(1) + '°';
+    document.getElementById('heading').textContent = d.heading.toFixed(1) + '\u00B0';
     document.getElementById('position').textContent = d.pos_x.toFixed(1) + ', ' + d.pos_y.toFixed(1);
+    document.getElementById('gridPos').textContent = d.grid_x + ', ' + d.grid_y;
     document.getElementById('totalDist').textContent = d.distance.toFixed(0) + ' cm';
-    document.getElementById('encTicks').textContent = (d.enc_l||0) + '/' + (d.enc_r||0);
+    document.getElementById('encTicks').textContent = (d.enc_l||0) + ' / ' + (d.enc_r||0);
     document.getElementById('crumbs').textContent = d.crumbs;
 
-    const battPct = Math.round(Math.max(0, Math.min(100, (d.battery - 6.0) / 2.4 * 100)));
     const battEl = document.getElementById('battery');
-    battEl.textContent = d.battery.toFixed(1) + 'V ' + battPct + '%';
-    battEl.style.color = d.battery < 6.5 ? '#C5221F' : d.battery < 7.0 ? '#D4923A' : '';
+    battEl.textContent = d.battery.toFixed(1) + 'V';
+    battEl.style.color = d.battery < 6.5 ? '#C5221F' : '#3D3929';
 
     document.getElementById('pathLen').textContent = d.path_length + ' steps';
     document.getElementById('avoidState').textContent = d.state_name;
 
-    const m = document.getElementById('mode');
-    if (d.backtracking) { m.textContent = 'Backtrack'; m.style.color = '#D4923A'; }
-    else if (d.auto) { m.textContent = 'Auto'; m.style.color = '#1A73C4'; }
-    else { m.textContent = 'Manual'; m.style.color = '#C96442'; }
+    const modeEl = document.getElementById('mode');
+    if (d.backtracking)   { modeEl.textContent = 'Backtracking'; modeEl.className = 'value'; modeEl.style.color = '#D4923A'; }
+    else if (d.auto)      { modeEl.textContent = 'Autonomous';   modeEl.className = 'value mode-auto'; modeEl.style.color = ''; }
+    else                  { modeEl.textContent = 'Manual';        modeEl.className = 'value mode-manual'; modeEl.style.color = ''; }
 
-    document.getElementById('accelX').textContent = (d.accel_x||0).toFixed(2);
-    document.getElementById('accelY').textContent = (d.accel_y||0).toFixed(2);
-    document.getElementById('accelZ').textContent = (d.accel_z||0).toFixed(2);
-    document.getElementById('gyroX').textContent = (d.gyro_x||0).toFixed(1);
-    document.getElementById('gyroY').textContent = (d.gyro_y||0).toFixed(1);
-    document.getElementById('gyroZ').textContent = (d.gyro_rate||0).toFixed(1);
-    document.getElementById('mpuTemp').textContent = (d.mpu_temp||0).toFixed(1) + '°C';
+    const targetEl = document.getElementById('curTarget');
+    targetEl.textContent = d.has_target ? 'X:' + d.target_wx.toFixed(0) + ' Y:' + d.target_wy.toFixed(0) + ' cm' : 'none';
 
-    document.getElementById('curTarget').textContent = d.has_target ? d.target_wx.toFixed(0)+','+d.target_wy.toFixed(0) : 'none';
-    const s = document.getElementById('targetStatus');
-    if (d.backtracking) { s.textContent = 'Backtracking'; s.className = 'tracking'; }
-    else if (d.target_reached) { s.textContent = 'Reached'; s.className = 'reached'; }
+    const statusEl = document.getElementById('targetStatus');
+    if (d.backtracking) { statusEl.textContent = 'Backtracking... (' + d.crumbs + ' crumbs)'; statusEl.className = 'tracking'; }
+    else if (d.target_reached) { statusEl.textContent = 'Target reached'; statusEl.className = 'reached'; }
     else if (d.has_target) {
-        s.textContent = Math.sqrt((d.target_wx-d.pos_x)**2+(d.target_wy-d.pos_y)**2).toFixed(0)+'cm away';
-        s.className = 'tracking';
-    } else { s.textContent = 'Click map'; s.className = ''; }
+        const dist = Math.sqrt((d.target_wx-d.pos_x)**2 + (d.target_wy-d.pos_y)**2);
+        statusEl.textContent = 'Navigating... ' + dist.toFixed(0) + ' cm away';
+        statusEl.className = 'tracking';
+    } else { statusEl.textContent = 'No target set'; statusEl.className = ''; }
 
-    document.getElementById('rssi').textContent = (d.wifi_rssi||'--')+' dBm';
-    document.getElementById('heap').textContent = d.free_heap ? (d.free_heap/1024).toFixed(1)+'KB' : '--';
-    if (d.uptime) { document.getElementById('uptime').textContent = Math.floor(d.uptime/60)+'m'+(d.uptime%60)+'s'; }
+    document.getElementById('rssi').textContent = (d.wifi_rssi || '--') + ' dBm';
+    document.getElementById('heap').textContent = d.free_heap ? (d.free_heap / 1024).toFixed(1) + 'KB' : '--';
+    if (d.uptime) { const m = Math.floor(d.uptime/60); document.getElementById('uptime').textContent = m + 'm' + (d.uptime%60) + 's'; }
 
     drawGrid(d);
 }
@@ -497,154 +735,364 @@ function updateUI(d) {
 function setDist(id, val) {
     const el = document.getElementById(id);
     el.textContent = (val > 400 ? '> 400' : val.toFixed(1)) + ' cm';
-    el.className = val < 15 ? 'val dist-danger' : val < 30 ? 'val dist-warn' : 'val dist-ok';
+    if (val < 15)      el.className = 'value dist-danger';
+    else if (val < 30) el.className = 'value dist-warn';
+    else               el.className = 'value dist-ok';
 }
 
-// MAP — always square
-function sizeMap() {
-    const area = document.querySelector('.map-area');
-    const sz = Math.floor(area.getBoundingClientRect().height);
-    if (sz <= 0) return;
-    const inner = document.getElementById('mapInner');
-    inner.style.width = sz + 'px';
-    inner.style.height = sz + 'px';
+function setDisconnected() {
+    document.getElementById('connStatus').textContent = 'Server Error';
+    document.getElementById('connStatus').className = 'conn-badge conn-off';
 }
-window.addEventListener('resize', sizeMap);
 
 function drawGrid(d) {
-    sizeMap();
     const canvas = document.getElementById('gridMap');
-    const inner = document.getElementById('mapInner');
-    const size = inner.clientWidth;
-    if (size <= 0) return;
-    canvas.width = size; canvas.height = size;
     const ctx = canvas.getContext('2d');
-    const cw = size / GRID_SIZE;
+    const cellW = canvas.width / GRID_SIZE;
+    const cellH = canvas.height / GRID_SIZE;
 
-    ctx.fillStyle = '#F7F3ED'; ctx.fillRect(0, 0, size, size);
-    ctx.strokeStyle = '#E8E0D4'; ctx.lineWidth = 0.3;
+    // Warm background
+    ctx.fillStyle = '#F7F3ED';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Grid lines
+    ctx.strokeStyle = '#E8E0D4';
+    ctx.lineWidth = 0.5;
     for (let i = 0; i <= GRID_SIZE; i++) {
-        ctx.beginPath(); ctx.moveTo(i*cw, 0); ctx.lineTo(i*cw, size); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(0, i*cw); ctx.lineTo(size, i*cw); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(i*cellW, 0); ctx.lineTo(i*cellW, canvas.height); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, i*cellH); ctx.lineTo(canvas.width, i*cellH); ctx.stroke();
     }
 
+    // Robot (warm orange)
     const rx = d.grid_x, ry = d.grid_y;
     if (rx >= 0 && rx < GRID_SIZE && ry >= 0 && ry < GRID_SIZE) {
         ctx.fillStyle = '#C96442';
-        ctx.beginPath(); ctx.arc(rx*cw+cw/2, ry*cw+cw/2, cw*0.55, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath();
+        ctx.arc(rx*cellW + cellW/2, ry*cellH + cellH/2, cellW*0.6, 0, Math.PI*2);
+        ctx.fill();
+
+        // Heading line
+        const cx = rx*cellW + cellW/2, cy = ry*cellH + cellH/2;
         const hRad = d.heading * Math.PI / 180;
-        ctx.strokeStyle = '#C96442'; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.moveTo(rx*cw+cw/2, ry*cw+cw/2);
-        ctx.lineTo(rx*cw+cw/2 + cw*1.2*Math.sin(hRad), ry*cw+cw/2 - cw*1.2*Math.cos(hRad));
+        ctx.strokeStyle = '#C96442';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + cellW*1.4*Math.sin(hRad), cy - cellH*1.4*Math.cos(hRad));
         ctx.stroke();
     }
 
+    // Target (blue)
     const tx = d.target_x, ty = d.target_y;
-    if (d.has_target && tx >= 0 && tx < GRID_SIZE && ty >= 0 && ty < GRID_SIZE) {
+    if (tx >= 0 && tx < GRID_SIZE && ty >= 0 && ty < GRID_SIZE && d.has_target) {
         ctx.fillStyle = '#1A73C4';
-        ctx.beginPath(); ctx.arc(tx*cw+cw/2, ty*cw+cw/2, cw*0.45, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath();
+        ctx.arc(tx*cellW + cellW/2, ty*cellH + cellH/2, cellW*0.5, 0, Math.PI*2);
+        ctx.fill();
+        // Crosshair
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(tx*cellW+2, ty*cellH+cellH/2); ctx.lineTo((tx+1)*cellW-2, ty*cellH+cellH/2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(tx*cellW+cellW/2, ty*cellH+2); ctx.lineTo(tx*cellW+cellW/2, (ty+1)*cellH-2); ctx.stroke();
     } else if (d.has_target) {
         const dx = d.target_wx-d.pos_x, dy = d.target_wy-d.pos_y;
-        const a = Math.atan2(dx, dy);
-        const ex = GRID_SIZE/2 + Math.sin(a)*GRID_SIZE/2;
-        const ey = GRID_SIZE/2 - Math.cos(a)*GRID_SIZE/2;
+        const angle = Math.atan2(dx, dy);
+        const ex = Math.min(Math.max(GRID_SIZE/2 + Math.sin(angle)*GRID_SIZE/2, 0), GRID_SIZE-1);
+        const ey = Math.min(Math.max(GRID_SIZE/2 - Math.cos(angle)*GRID_SIZE/2, 0), GRID_SIZE-1);
         ctx.fillStyle = '#1A73C4';
-        ctx.beginPath(); ctx.arc(Math.max(0,Math.min(GRID_SIZE-1,ex))*cw+cw/2, Math.max(0,Math.min(GRID_SIZE-1,ey))*cw+cw/2, 3, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(ex*cellW+cellW/2, ey*cellH+cellH/2, 4, 0, Math.PI*2); ctx.fill();
     }
 }
 
-document.getElementById('gridMap').addEventListener('click', function(e) {
-    const d = lastStatus; if (!d.grid_x && d.grid_x !== 0) return;
-    const rect = this.getBoundingClientRect();
-    const sx = this.width / rect.width, sy = this.height / rect.height;
-    const gx = Math.floor((e.clientX - rect.left) * sx / (this.width / GRID_SIZE));
-    const gy = Math.floor((e.clientY - rect.top) * sy / (this.height / GRID_SIZE));
-    const CS = 10;
-    const ox = d.pos_x - d.grid_x * CS, oy = d.pos_y - d.grid_y * CS;
-    apiFetch('/api/target', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({x: ox + gx * CS, y: oy + gy * CS})
-    });
-});
-
-// CONTROLS
 function sendCmd(cmd) {
-    apiFetch('/api/control', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({cmd}) });
+    apiFetch('/api/control', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({cmd: cmd})
+    });
 }
-const keyMap = {'ArrowUp':'forward','w':'forward','W':'forward','ArrowDown':'back','s':'back','S':'back','ArrowLeft':'left','a':'left','A':'left','ArrowRight':'right','d':'right','D':'right',' ':'stop','b':'backtrack','B':'backtrack','r':'reset','R':'reset'};
+
+function setTarget() {
+    apiFetch('/api/target', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            x: parseFloat(document.getElementById('targetX').value) || 0,
+            y: parseFloat(document.getElementById('targetY').value) || 0
+        })
+    });
+}
+
+const keyMap = {
+    'ArrowUp':'forward','w':'forward','W':'forward',
+    'ArrowDown':'back','s':'back','S':'back',
+    'ArrowLeft':'left','a':'left','A':'left',
+    'ArrowRight':'right','d':'right','D':'right',
+    ' ':'stop','b':'backtrack','B':'backtrack','r':'reset','R':'reset'
+};
 const keysDown = new Set();
 document.addEventListener('keydown', e => {
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-    const c = keyMap[e.key]; if (c && !keysDown.has(e.key)) { keysDown.add(e.key); sendCmd(c); }
+    if (e.target.tagName === 'INPUT') return;
+    const cmd = keyMap[e.key];
+    if (cmd && !keysDown.has(e.key)) { keysDown.add(e.key); sendCmd(cmd); }
 });
 document.addEventListener('keyup', e => {
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-    const c = keyMap[e.key];
-    if (c && c!=='stop' && c!=='backtrack' && c!=='reset') { keysDown.delete(e.key); if (keysDown.size===0) sendCmd('stop'); }
-    else keysDown.delete(e.key);
+    if (e.target.tagName === 'INPUT') return;
+    const cmd = keyMap[e.key];
+    if (cmd && cmd!=='stop' && cmd!=='backtrack' && cmd!=='reset') {
+        keysDown.delete(e.key);
+        if (keysDown.size === 0) sendCmd('stop');
+    } else keysDown.delete(e.key);
 });
 document.querySelectorAll('.control-pad .btn').forEach(b => b.addEventListener('touchstart', e => e.preventDefault()));
 
+function fetchDebugLogs() {
+    apiFetch('/api/debug/logs?since=' + debugLogIndex)
+        .then(r => r.json())
+        .then(data => {
+            if (data.logs && data.logs.length > 0) {
+                const con = document.getElementById('debugConsole');
+                data.logs.forEach(line => {
+                    const div = document.createElement('div');
+                    div.className = 'log-line';
+                    if (line.includes('ERROR')) div.className += ' log-error';
+                    else if (line.includes('WARNING')) div.className += ' log-warn';
+                    else if (line.includes('[TEST]')) div.className += ' log-test';
+                    else if (line.includes(' OK')) div.className += ' log-ok';
+                    div.textContent = line;
+                    con.appendChild(div);
+                });
+                con.scrollTop = con.scrollHeight;
+                while (con.children.length > 500) con.removeChild(con.firstChild);
+            }
+            debugLogIndex = data.total;
+        }).catch(() => {});
+}
+
 function clearLogs() {
     apiFetch('/api/debug/clear', {method:'POST', headers:{'Content-Type':'application/json'}});
-    document.getElementById('debugConsole').innerHTML = '<div class="log-line">Cleared</div>';
+    document.getElementById('debugConsole').innerHTML = '<div class="log-line log-time">Logs cleared</div>';
     debugLogIndex = 0;
 }
 
-// AI
-function getUsername() { return document.getElementById('userName').value.trim() || 'Anon'; }
-function sendAI() {
-    const inp = document.getElementById('aiInput'), text = inp.value.trim(); if (!text) return; inp.value = '';
-    apiFetch('/api/ai/translate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text, user: getUsername()}) })
-    .then(r => { if (!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
-    .then(data => { if (data.error) addBubble(data.error,'error'); updateAI(); })
-    .catch(err => addBubble('Error: '+err.message,'error'));
-}
-function addBubble(text, type) {
-    const h = document.getElementById('aiHistory'), b = document.createElement('div');
-    b.className = 'ai-bubble ai-bubble-'+type; b.textContent = text;
-    h.appendChild(b); h.scrollTop = h.scrollHeight;
-    while (h.children.length > 80) h.removeChild(h.firstChild);
-}
-function updateAI() {
-    apiFetch('/api/ai/status').then(r => r.json()).then(d => {
-        document.getElementById('ollamaDot').className = 'dot '+(d.ollama_available?'dot-on':'dot-off');
-        document.getElementById('ollamaStatus').textContent = d.ollama_available ? 'Ollama' : 'Rules';
-        document.getElementById('aiQueueBadge').innerHTML = d.queue_length > 0 ? `<span class="ai-queue-badge">${d.queue_length}q</span>` : '';
-    }).catch(() => {});
+// =============================================
+// AI COMMAND TRANSLATOR
+// =============================================
+function getUsername() {
+    return document.getElementById('userName').value.trim() || 'Anonymous';
 }
 
-// VOICE
-let recognition = null, isListening = false;
-function toggleVoice() {
-    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) { addBubble('Voice not supported','error'); return; }
-    if (isListening) { stopVoice(); return; }
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    recognition = new SR(); recognition.lang = document.getElementById('voiceLang').value;
-    recognition.interimResults = false; recognition.maxAlternatives = 3;
-    recognition.onstart = () => { isListening=true; document.getElementById('voiceBtn').classList.add('listening'); document.getElementById('aiInput').placeholder='Listening...'; };
-    recognition.onresult = (ev) => {
-        let text = ev.results[0][0].transcript;
-        if (document.getElementById('voiceLang').value === 'th-TH') {
-            const m = {'ไปข้างหน้า':'go forward','ข้างหน้า':'forward','หน้า':'forward','ถอยหลัง':'go backward','ข้างหลัง':'backward','หลัง':'backward','ซ้าย':'left','ไปซ้าย':'go left','ขวา':'right','ไปขวา':'go right','หยุด':'stop','กลับบ้าน':'come back','กลับ':'come back','รีเซ็ต':'reset','เมตร':'meters','เซนติเมตร':'cm','ซม':'cm','หนึ่ง':'1','สอง':'2','สาม':'3','สี่':'4','ห้า':'5','หก':'6','เจ็ด':'7','แปด':'8','เก้า':'9','สิบ':'10'};
-            let t2 = text; for (const [k,v] of Object.entries(m)) t2=t2.replace(new RegExp(k,'g'),v);
-            if (t2!==text) { addBubble('[TH] '+text,'user'); text=t2; }
+function sendAI() {
+    const input = document.getElementById('aiInput');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+
+    apiFetch('/api/ai/translate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({text: text, user: getUsername()})
+    })
+    .then(r => {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    })
+    .then(data => {
+        // Chat polling will show the messages from server
+        // But show local feedback immediately for responsiveness
+        if (data.error) {
+            addAIBubble(data.error, 'error');
         }
-        document.getElementById('aiInput').value = text;
-        apiFetch('/api/ai/translate', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text, user:getUsername()+' (voice)'}) })
-        .then(r=>r.json()).then(d=>{ if(d.error)addBubble(d.error,'error'); updateAI(); }).catch(e=>addBubble('Error: '+e.message,'error'));
+        updateAIStatus();
+    })
+    .catch(err => addAIBubble('Error: ' + err.message, 'error'));
+}
+
+function addAIBubble(text, type, meta) {
+    const history = document.getElementById('aiHistory');
+    const bubble = document.createElement('div');
+    bubble.className = 'ai-bubble ai-bubble-' + type;
+    bubble.textContent = text;
+    history.appendChild(bubble);
+
+    if (meta) {
+        const metaDiv = document.createElement('div');
+        metaDiv.className = 'ai-meta';
+        metaDiv.textContent = meta;
+        history.appendChild(metaDiv);
+    }
+
+    history.scrollTop = history.scrollHeight;
+
+    // Keep last 50 bubbles
+    while (history.children.length > 100) history.removeChild(history.firstChild);
+}
+
+function updateAIStatus() {
+    apiFetch('/api/ai/status')
+        .then(r => r.json())
+        .then(data => {
+            const dot = document.getElementById('ollamaDot');
+            const status = document.getElementById('ollamaStatus');
+            dot.className = 'dot ' + (data.ollama_available ? 'dot-on' : 'dot-off');
+            status.textContent = data.ollama_available ? 'Ollama online' : 'Ollama offline (using rules)';
+
+            const badge = document.getElementById('aiQueueBadge');
+            badge.innerHTML = data.queue_length > 0
+                ? `<span class="ai-queue-badge">${data.queue_length} queued</span>` : '';
+        })
+        .catch(() => {});
+}
+
+// =============================================
+// VOICE INPUT (Web Speech API)
+// =============================================
+let recognition = null;
+let isListening = false;
+
+function toggleVoice() {
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+        addAIBubble('Voice not supported in this browser. Use Chrome or Edge.', 'error');
+        return;
+    }
+
+    if (isListening) {
+        stopVoice();
+        return;
+    }
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognition = new SpeechRecognition();
+    recognition.lang = document.getElementById('voiceLang').value;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 3;  // Get top 3 guesses, pick best
+    recognition.continuous = false;
+
+    recognition.onstart = () => {
+        isListening = true;
+        document.getElementById('voiceBtn').classList.add('listening');
+        document.getElementById('aiInput').placeholder = 'Listening...';
     };
-    recognition.onerror = (ev) => { if(ev.error!=='aborted') addBubble('Voice: '+ev.error,'error'); stopVoice(); };
+
+    recognition.onresult = (event) => {
+        // Pick best from alternatives
+        let text = event.results[0][0].transcript;
+        let confidence = (event.results[0][0].confidence * 100).toFixed(0);
+
+        // Log all alternatives for debug
+        for (let i = 0; i < event.results[0].length; i++) {
+            const alt = event.results[0][i];
+            console.log(`Voice alt ${i}: "${alt.transcript}" (${(alt.confidence*100).toFixed(0)}%)`);
+        }
+
+        // If Thai, translate common direction words to English for the AI
+        const lang = document.getElementById('voiceLang').value;
+        if (lang === 'th-TH') {
+            const thaiMap = {
+                // Directions
+                'ไปข้างหน้า': 'go forward', 'ข้างหน้า': 'forward', 'หน้า': 'forward',
+                'ถอยหลัง': 'go backward', 'ข้างหลัง': 'backward', 'หลัง': 'backward',
+                'ซ้าย': 'left', 'ไปซ้าย': 'go left',
+                'ขวา': 'right', 'ไปขวา': 'go right',
+                'เหนือ': 'north', 'ใต้': 'south', 'ตะวันออก': 'east', 'ตะวันตก': 'west',
+                // Units
+                'เมตร': 'meters', 'เซนติเมตร': 'cm', 'ซม': 'cm',
+                // Commands
+                'หยุด': 'stop', 'กลับบ้าน': 'come back', 'กลับ': 'come back',
+                'รีเซ็ต': 'reset',
+                // Numbers
+                'หนึ่ง': '1', 'สอง': '2', 'สาม': '3', 'สี่': '4', 'ห้า': '5',
+                'หก': '6', 'เจ็ด': '7', 'แปด': '8', 'เก้า': '9', 'สิบ': '10',
+            };
+            let translated = text;
+            for (const [th, en] of Object.entries(thaiMap)) {
+                translated = translated.replace(new RegExp(th, 'g'), en);
+            }
+            if (translated !== text) {
+                addAIBubble(`[TH] ${text}`, 'user');
+                text = translated;
+            }
+        }
+
+        document.getElementById('aiInput').value = text;
+        addAIBubble(`[Voice ${confidence}%] ${text}`, 'user');
+
+        // Auto-send voice result
+        apiFetch('/api/ai/translate', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({text: text, user: getUsername() + ' (voice)'})
+        })
+        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(data => {
+            if (data.error) {
+                addAIBubble(data.error, 'error');
+            } else {
+                addAIBubble(data.explanation, 'ai', `${data.method} | ${data.duration_ms}ms`);
+                (data.commands || []).forEach((cmd, i) => {
+                    let desc = cmd.action === 'set_target' ? `set_target X:${cmd.x} Y:${cmd.y}` : cmd.action;
+                    addAIBubble(`[${i+1}] ${desc}`, 'cmd');
+                });
+            }
+            updateAIStatus();
+        })
+        .catch(err => addAIBubble('Error: ' + err.message, 'error'));
+    };
+
+    recognition.onerror = (event) => {
+        if (event.error !== 'aborted') {
+            addAIBubble('Voice error: ' + event.error, 'error');
+        }
+        stopVoice();
+    };
+
     recognition.onend = () => stopVoice();
+
     recognition.start();
 }
-function stopVoice() { isListening=false; document.getElementById('voiceBtn').classList.remove('listening'); document.getElementById('aiInput').placeholder="Tell the robot what to do..."; if(recognition){try{recognition.stop();}catch(e){}} }
 
-// POLL — single merged request for status + debug + chat
-setInterval(fetchDashboard, 500);
-setInterval(updateAI, 5000);
-fetchDashboard(); updateAI();
-sizeMap();
+function stopVoice() {
+    isListening = false;
+    document.getElementById('voiceBtn').classList.remove('listening');
+    document.getElementById('aiInput').placeholder = "Tell the robot what to do...";
+    if (recognition) { try { recognition.stop(); } catch(e) {} }
+}
+
+// =============================================
+// SHARED CHAT POLLING (all users see same messages)
+// =============================================
+let chatIndex = 0;
+
+function fetchChat() {
+    apiFetch('/api/chat?since=' + chatIndex)
+        .then(r => r.json())
+        .then(data => {
+            if (data.messages && data.messages.length > 0) {
+                data.messages.forEach(msg => {
+                    if (msg.type === 'user') {
+                        addAIBubble(`[${msg.user}] ${msg.text}`, 'user');
+                    } else if (msg.type === 'ai') {
+                        addAIBubble(msg.text, 'ai');
+                    } else if (msg.type === 'cmd') {
+                        addAIBubble(msg.text, 'cmd');
+                    } else if (msg.type === 'error') {
+                        addAIBubble(msg.text, 'error');
+                    }
+                });
+            }
+            chatIndex = data.total;
+        })
+        .catch(() => {});
+}
+
+setInterval(fetchChat, 500);
+setInterval(updateAIStatus, 5000);
+updateAIStatus();
+
+setInterval(fetchStatus, 500);
+setInterval(fetchDebugLogs, 500);
+fetchStatus();
+fetchDebugLogs();
 </script>
 </body>
 </html>

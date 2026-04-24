@@ -9,6 +9,7 @@ if errorlevel 1 (
 )
 
 set PORT=25565
+if "%ROBOT_API_TOKEN%"=="" set ROBOT_API_TOKEN=robot123
 rem Cloudflare tunnel starts automatically if cloudflared is installed.
 rem To use a manually-started tunnel instead: set CLOUDFLARE_URL=https://your-tunnel.trycloudflare.com
 python app.py

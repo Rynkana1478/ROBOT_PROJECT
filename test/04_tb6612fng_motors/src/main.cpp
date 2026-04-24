@@ -8,13 +8,13 @@
 
 #include <Arduino.h>
 
-#define AIN1  4
+#define AIN1  6
 #define AIN2  5
-#define PWMA  6
-#define BIN1  7
-#define BIN2  15
-#define PWMB  16
-#define STBY  17
+#define PWMA  4
+#define BIN1  15
+#define BIN2  16
+#define PWMB  17
+#define STBY  7
 
 // LEDC channels
 #define CH_L  0
