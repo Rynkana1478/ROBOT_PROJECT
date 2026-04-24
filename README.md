@@ -4,10 +4,10 @@ Autonomous 4WD robot with obstacle avoidance, A* pathfinding, and web dashboard 
 
 ## Features
 
-- **Obstacle avoidance** — Ultrasonic sensor on servo sweep, non-blocking state machine
+- **Obstacle avoidance** — Continuous 8-position ultrasonic sweep (20°–160°), non-blocking state machine
 - **A* pathfinding** — 8-directional, obstacle inflation, path smoothing, sliding 40x40 grid (unlimited range)
 - **Backtracking** — 100 breadcrumbs (20m range) to retrace path home
-- **Dual-core** — Core 1 runs robot logic at 20Hz, Core 0 handles WiFi (never blocks)
+- **Dual-core** — Core 0 owns servo sweep + WiFi sync, Core 1 runs brain (avoidance + navigation + motors)
 - **Web dashboard** — Live sensor data, manual controls, destination input, grid map, hardware tests
 - **Built-in charging** — 2S BMS + USB-C charger, never remove batteries
 - **AI natural language control** — Ollama LLM translates "go forward 2m" to robot commands (offline, free)
@@ -23,7 +23,7 @@ Autonomous 4WD robot with obstacle avoidance, A* pathfinding, and web dashboard 
 | ESP32-S3 DevKitC-1 | Dual-core 240MHz, WiFi+BLE, 34 GPIO |
 | TB6612FNG | Motor driver, 1.2A/ch, separate PWM+direction |
 | 4WD Smart Car Chassis | Frame + 4 TT motors + wheels |
-| HC-SR04 + SG90 Servo | Ultrasonic distance + sweep left/center/right |
+| HC-SR04 + SG90 Servo | Ultrasonic distance + 8-position continuous sweep |
 | MPU6050 | Gyroscope heading (integrated over time) |
 | Speed Encoders (x2) | Left + right wheel odometry |
 | 2S 18650 (7.4V) | Rechargeable Li-ion power |
@@ -35,15 +35,15 @@ Autonomous 4WD robot with obstacle avoidance, A* pathfinding, and web dashboard 
 
 | GPIO | Connection |
 |------|------------|
-| 4 | TB6612 AIN1 (left dir) |
+| 6 | TB6612 AIN1 (left dir) |
 | 5 | TB6612 AIN2 (left dir) |
-| 6 | TB6612 PWMA (left speed) |
-| 7 | TB6612 BIN1 (right dir) |
-| 15 | TB6612 BIN2 (right dir) |
-| 16 | TB6612 PWMB (right speed) |
-| 17 | TB6612 STBY |
+| 4 | TB6612 PWMA (left speed) |
+| 15 | TB6612 BIN1 (right dir) |
+| 16 | TB6612 BIN2 (right dir) |
+| 17 | TB6612 PWMB (right speed) |
+| 7 | TB6612 STBY |
 | 18 | HC-SR04 Trigger |
-| 8 | HC-SR04 Echo |
+| 3 | HC-SR04 Echo |
 | 9 | Servo signal (50Hz LEDC) |
 | 11 | I2C SDA (MPU6050) |
 | 12 | I2C SCL (MPU6050) |
@@ -99,7 +99,7 @@ Then edit `src/secrets.h`:
 #define SERVER_HOST   "192.168.43.100"    // Your PC's IP (or cloudflare URL)
 #define SERVER_PORT   25565               // Match your server port
 #define SERVER_HTTPS  false               // true if using cloudflare tunnel
-#define API_TOKEN     "robot123"          // Must match server token
+#define CHASSIS_ID    "my-robot"          // Name shown on dashboard
 ```
 
 ### 4. Upload Firmware
@@ -139,13 +139,13 @@ Dashboard shows **CONNECTED** → ready to go.
 robot_chassis/
 ├── src/                            # ESP32-S3 firmware
 │   ├── config.h                    # Pins, speeds, WiFi, thresholds
-│   ├── encoder.h                   # Dual encoder differential odometry
+│   ├── encoder.h                   # Wheel tick counting + gyro-based odometry
 │   ├── motors.h                    # TB6612FNG with LEDC PWM
-│   ├── sensors.h                   # Ultrasonic sweep + MPU6050 gyro heading
+│   ├── sensors.h                   # Continuous sweep data + MPU6050 gyro heading
 │   ├── avoidance.h                 # Non-blocking obstacle avoidance
 │   ├── pathfinder.h                # A* with 8-dir, inflation, smoothing
 │   ├── debug.h                     # WiFi debug log buffer
-│   └── robot_main.cpp              # Dual-core main + WiFi task + tests
+│   └── robot_main.cpp              # Dual-core main (Core 0 sweep+WiFi, Core 1 brain)
 ├── server/                         # PC dashboard server
 │   ├── app.py                      # Flask REST API + AI command queue
 │   ├── ai_translator.py            # Ollama LLM + rule-based fallback
@@ -174,16 +174,19 @@ robot_chassis/
 Phone Hotspot (2.4GHz WiFi)
   │
   ├── ESP32-S3 Robot
-  │     ├── Core 1: Sensors + avoidance + pathfinding (20Hz)
-  │     └── Core 0: WiFi telemetry POST + command GET (5Hz)
+  │     ├── Core 0: Continuous servo sweep (8 positions, 20°-160°)
+  │     │           + WiFi sync during servo settle time
+  │     │           Single /api/robot/sync endpoint (replaces 3 HTTP calls)
+  │     └── Core 1: Brain — avoidance + navigation + motors (20Hz)
+  │                 Reads sweep data via spinlock-protected shared struct
   │
   └── PC (Flask server + Ollama AI)
-        ├── Stores robot state
-        ├── Serves web dashboard (multi-user)
+        ├── Single /api/dashboard endpoint (replaces 3 browser polls)
+        ├── Chassis identified by X-Chassis-ID header (no auth token)
         ├── AI translator: natural language → robot commands
         ├── Voice input via Web Speech API
         ├── Shared chat log (all users see all commands)
-        └── Debug log streaming
+        └── Cloudflare tunnel (auto-starts if cloudflared installed)
 
 Priority: Safety (avoidance) > Navigation (pathfinding) > AI/Manual control
 ```

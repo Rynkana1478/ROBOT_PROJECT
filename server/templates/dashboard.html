@@ -468,7 +468,7 @@
     <header>
         <div class="logo">
             <div class="logo-icon">R</div>
-            <h1>Robot Dashboard</h1>
+            <h1>Robot Dashboard <span id="chassisId" style="font-size:0.7em;color:#8B7E6A;font-weight:400"></span></h1>
         </div>
         <div id="connStatus" class="conn-badge conn-off">Disconnected</div>
     </header>
@@ -650,38 +650,42 @@
 
 <script>
 const GRID_SIZE = {{ grid_size }};
-let API_TOKEN = localStorage.getItem('robot_api_token') || '';
 let debugLogIndex = 0;
+let chatIndex = 0;
 
-function promptForToken(reason) {
-    const t = window.prompt(reason || 'API token:');
-    if (t) {
-        API_TOKEN = t.trim();
-        localStorage.setItem('robot_api_token', API_TOKEN);
-    }
-    return API_TOKEN;
-}
-
-if (!API_TOKEN) promptForToken('Enter robot API token (matches ROBOT_API_TOKEN on the server):');
-
-function apiFetch(url, options = {}) {
-    if (!options.headers) options.headers = {};
-    options.headers['X-Robot-Token'] = API_TOKEN;
-    return fetch(url, options).then(r => {
-        if (r.status === 401) {
-            // Stored token rejected — clear and re-prompt for next call
-            localStorage.removeItem('robot_api_token');
-            API_TOKEN = '';
-            promptForToken('Token rejected. Try again:');
-        }
-        return r;
-    });
-}
-
-function fetchStatus() {
-    apiFetch('/api/status')
+function fetchDashboard() {
+    fetch('/api/dashboard?debug_since=' + debugLogIndex + '&chat_since=' + chatIndex)
         .then(r => r.json())
-        .then(updateDashboard)
+        .then(data => {
+            updateDashboard(data.status);
+
+            if (data.debug.logs && data.debug.logs.length > 0) {
+                const con = document.getElementById('debugConsole');
+                data.debug.logs.forEach(line => {
+                    const div = document.createElement('div');
+                    div.className = 'log-line';
+                    if (line.includes('ERROR')) div.className += ' log-error';
+                    else if (line.includes('WARNING')) div.className += ' log-warn';
+                    else if (line.includes('[TEST]')) div.className += ' log-test';
+                    else if (line.includes(' OK')) div.className += ' log-ok';
+                    div.textContent = line;
+                    con.appendChild(div);
+                });
+                con.scrollTop = con.scrollHeight;
+                while (con.children.length > 500) con.removeChild(con.firstChild);
+            }
+            debugLogIndex = data.debug.total;
+
+            if (data.chat.messages && data.chat.messages.length > 0) {
+                data.chat.messages.forEach(msg => {
+                    if (msg.type === 'user') addAIBubble('[' + msg.user + '] ' + msg.text, 'user');
+                    else if (msg.type === 'ai') addAIBubble(msg.text, 'ai');
+                    else if (msg.type === 'cmd') addAIBubble(msg.text, 'cmd');
+                    else if (msg.type === 'error') addAIBubble(msg.text, 'error');
+                });
+            }
+            chatIndex = data.chat.total;
+        })
         .catch(() => setDisconnected());
 }
 
@@ -689,6 +693,11 @@ function updateDashboard(d) {
     const conn = document.getElementById('connStatus');
     conn.textContent = d.connected ? 'Connected' : 'Disconnected';
     conn.className = 'conn-badge ' + (d.connected ? 'conn-ok' : 'conn-off');
+
+    const chassisEl = document.getElementById('chassisId');
+    if (d.chassis_id && d.chassis_id !== 'unknown') {
+        chassisEl.textContent = '(' + d.chassis_id + ')';
+    }
 
     setDist('distFront', d.front);
     setDist('distLeft', d.left);
@@ -805,7 +814,7 @@ function drawGrid(d) {
 }
 
 function sendCmd(cmd) {
-    apiFetch('/api/control', {
+    fetch('/api/control', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({cmd: cmd})
@@ -813,7 +822,7 @@ function sendCmd(cmd) {
 }
 
 function setTarget() {
-    apiFetch('/api/target', {
+    fetch('/api/target', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
@@ -846,31 +855,9 @@ document.addEventListener('keyup', e => {
 });
 document.querySelectorAll('.control-pad .btn').forEach(b => b.addEventListener('touchstart', e => e.preventDefault()));
 
-function fetchDebugLogs() {
-    apiFetch('/api/debug/logs?since=' + debugLogIndex)
-        .then(r => r.json())
-        .then(data => {
-            if (data.logs && data.logs.length > 0) {
-                const con = document.getElementById('debugConsole');
-                data.logs.forEach(line => {
-                    const div = document.createElement('div');
-                    div.className = 'log-line';
-                    if (line.includes('ERROR')) div.className += ' log-error';
-                    else if (line.includes('WARNING')) div.className += ' log-warn';
-                    else if (line.includes('[TEST]')) div.className += ' log-test';
-                    else if (line.includes(' OK')) div.className += ' log-ok';
-                    div.textContent = line;
-                    con.appendChild(div);
-                });
-                con.scrollTop = con.scrollHeight;
-                while (con.children.length > 500) con.removeChild(con.firstChild);
-            }
-            debugLogIndex = data.total;
-        }).catch(() => {});
-}
 
 function clearLogs() {
-    apiFetch('/api/debug/clear', {method:'POST', headers:{'Content-Type':'application/json'}});
+    fetch('/api/debug/clear', {method:'POST', headers:{'Content-Type':'application/json'}});
     document.getElementById('debugConsole').innerHTML = '<div class="log-line log-time">Logs cleared</div>';
     debugLogIndex = 0;
 }
@@ -888,7 +875,7 @@ function sendAI() {
     if (!text) return;
     input.value = '';
 
-    apiFetch('/api/ai/translate', {
+    fetch('/api/ai/translate', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({text: text, user: getUsername()})
@@ -929,7 +916,7 @@ function addAIBubble(text, type, meta) {
 }
 
 function updateAIStatus() {
-    apiFetch('/api/ai/status')
+    fetch('/api/ai/status')
         .then(r => r.json())
         .then(data => {
             const dot = document.getElementById('ollamaDot');
@@ -1018,7 +1005,7 @@ function toggleVoice() {
         addAIBubble(`[Voice ${confidence}%] ${text}`, 'user');
 
         // Auto-send voice result
-        apiFetch('/api/ai/translate', {
+        fetch('/api/ai/translate', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({text: text, user: getUsername() + ' (voice)'})
@@ -1058,41 +1045,10 @@ function stopVoice() {
     if (recognition) { try { recognition.stop(); } catch(e) {} }
 }
 
-// =============================================
-// SHARED CHAT POLLING (all users see same messages)
-// =============================================
-let chatIndex = 0;
-
-function fetchChat() {
-    apiFetch('/api/chat?since=' + chatIndex)
-        .then(r => r.json())
-        .then(data => {
-            if (data.messages && data.messages.length > 0) {
-                data.messages.forEach(msg => {
-                    if (msg.type === 'user') {
-                        addAIBubble(`[${msg.user}] ${msg.text}`, 'user');
-                    } else if (msg.type === 'ai') {
-                        addAIBubble(msg.text, 'ai');
-                    } else if (msg.type === 'cmd') {
-                        addAIBubble(msg.text, 'cmd');
-                    } else if (msg.type === 'error') {
-                        addAIBubble(msg.text, 'error');
-                    }
-                });
-            }
-            chatIndex = data.total;
-        })
-        .catch(() => {});
-}
-
-setInterval(fetchChat, 500);
+setInterval(fetchDashboard, 500);
 setInterval(updateAIStatus, 5000);
+fetchDashboard();
 updateAIStatus();
-
-setInterval(fetchStatus, 500);
-setInterval(fetchDebugLogs, 500);
-fetchStatus();
-fetchDebugLogs();
 </script>
 </body>
 </html>

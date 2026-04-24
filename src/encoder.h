@@ -4,23 +4,20 @@
 #include <Arduino.h>
 #include "config.h"
 
-// Dual wheel encoders with differential odometry
-// Tracks position (X,Y) and can detect turns accurately
+// Dual wheel encoders — pure odometry (distance only)
+// Direction comes from MPU6050 heading, not encoder ticks
 
 volatile long encLeftCount  = 0;
 volatile long encRightCount = 0;
-volatile int8_t encLeftDir  = 1;
-volatile int8_t encRightDir = 1;
 
-void IRAM_ATTR encLeftISR()  { encLeftCount  += encLeftDir; }
-void IRAM_ATTR encRightISR() { encRightCount += encRightDir; }
+void IRAM_ATTR encLeftISR()  { encLeftCount++; }
+void IRAM_ATTR encRightISR() { encRightCount++; }
 
 class Encoder {
 public:
     float posX = 0;
     float posY = 0;
     float totalDistCm = 0;
-    float encoderHeading = 0;  // heading estimated from differential encoders (radians)
 
     void begin() {
         pinMode(ENCODER_L_PIN, INPUT_PULLUP);
@@ -31,16 +28,6 @@ public:
         encRightCount = 0;
         prevLeft = 0;
         prevRight = 0;
-    }
-
-    static void setDirection(int8_t dir) {
-        encLeftDir = dir;
-        encRightDir = dir;
-    }
-
-    static void setDirectionLR(int8_t left, int8_t right) {
-        encLeftDir = left;
-        encRightDir = right;
     }
 
     void update(float headingRad) {
@@ -55,23 +42,14 @@ public:
         prevLeft  = left;
         prevRight = right;
 
-        // Differential drive odometry
         float distL = dL * CM_PER_TICK;
         float distR = dR * CM_PER_TICK;
         float distAvg = (distL + distR) / 2.0;
 
-        // Total wheel travel (counts turns; pure spin still racks up cm).
-        // Don't use distAvg here — turns make L=-R, distAvg=0, dashboard reads 0.
-        totalDistCm += (abs(distL) + abs(distR)) / 2.0;
+        totalDistCm += distAvg;
 
-        // Update position using provided heading (from compass+gyro fusion)
         posX += distAvg * sin(headingRad);
         posY += distAvg * cos(headingRad);
-
-        // Also compute heading change from encoder differential
-        // (used as a sanity check, not primary heading source)
-        float dTheta = (distR - distL) / WHEEL_BASE_CM;
-        encoderHeading += dTheta;
     }
 
     int getGridX() { return (int)floor(posX / CELL_SIZE_CM) + (GRID_SIZE / 2); }
@@ -87,7 +65,6 @@ public:
         posX = 0;
         posY = 0;
         totalDistCm = 0;
-        encoderHeading = 0;
     }
 
     long getLeftCount()  { return encLeftCount; }
