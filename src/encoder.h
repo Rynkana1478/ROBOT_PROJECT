@@ -12,8 +12,9 @@ volatile long encRightCount = 0;
 static volatile unsigned long encLeftLastUs  = 0;
 static volatile unsigned long encRightLastUs = 0;
 
-// Minimum 200µs between ticks — TT motor maxes out at ~4000 ticks/s
-#define ENC_DEBOUNCE_US 200
+// TT motor max ~200 RPM × 20 holes = 67 ticks/s (15ms period)
+// 2ms debounce kills EMI noise while keeping every real tick
+#define ENC_DEBOUNCE_US 2000
 
 void IRAM_ATTR encLeftISR() {
     unsigned long now = micros();
@@ -36,6 +37,7 @@ public:
     float posX = 0;
     float posY = 0;
     float totalDistCm = 0;
+    bool encoderHealthy = true;
 
     void begin() {
         pinMode(ENCODER_L_PIN, INPUT_PULLUP);
@@ -59,6 +61,18 @@ public:
         long dR = right - prevRight;
         prevLeft  = left;
         prevRight = right;
+
+        // Ratio clamping + health check
+        if (dL > 1 && dR > 1) {
+            float ratio = (dL > dR) ? (float)dL / dR : (float)dR / dL;
+            encoderHealthy = (ratio < 3.0);
+            if (ratio > 5.0) {
+                if (dL > dR) dL = dR * 5;
+                else dR = dL * 5;
+            }
+        } else if (dL == 0 && dR == 0) {
+            encoderHealthy = true;
+        }
 
         float distL = dL * CM_PER_TICK;
         float distR = dR * CM_PER_TICK;

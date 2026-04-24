@@ -29,6 +29,7 @@ public:
 
     float gyroZOffset = 0;
     float prevGyroZ = 0;
+    int badI2Ccount = 0;
     unsigned long lastHeadingUpdate = 0;
     bool mpuReady = false;
 
@@ -74,7 +75,7 @@ public:
         distRight = minRight;
     }
 
-    // Gyro-only heading with outlier rejection
+    // Gyro-only heading with I2C corruption detection
     void updateHeading() {
         unsigned long now = millis();
         if (lastHeadingUpdate == 0) { lastHeadingUpdate = now; return; }
@@ -85,11 +86,23 @@ public:
         if (mpuReady) {
             sensors_event_t a, g, t;
             if (mpu.getEvent(&a, &g, &t)) {
-                gz = (g.gyro.z - gyroZOffset) * 180.0 / PI;
-                if (abs(gz) > GYRO_MAX_RATE) gz = prevGyroZ;
-                if (abs(gz) < GYRO_DEADZONE) gz = 0;
-                prevGyroZ = gz;
+                // Gravity sanity check: accel Z should be ~9.8 m/s²
+                // If it reads wildly off, the I2C data is corrupted
+                float az = abs(a.acceleration.z);
+                if (az < ACCEL_Z_MIN || az > ACCEL_Z_MAX) {
+                    badI2Ccount++;
+                    gz = 0;  // discard entire reading
+                } else {
+                    gz = (g.gyro.z - gyroZOffset) * 180.0 / PI;
+                    // Reject if rate changed too fast between consecutive reads
+                    if (abs(gz - prevGyroZ) > GYRO_JUMP_LIMIT) gz = prevGyroZ;
+                    if (abs(gz) > GYRO_MAX_RATE) gz = prevGyroZ;
+                    if (abs(gz) < GYRO_DEADZONE) gz = 0;
+                    prevGyroZ = gz;
+                    badI2Ccount = 0;
+                }
             } else {
+                badI2Ccount++;
                 gz = 0;
             }
         }
@@ -121,7 +134,7 @@ private:
         if (!mpu.begin(0x68, &Wire)) return;
         mpu.setAccelerometerRange(MPU6050_RANGE_2_G);
         mpu.setGyroRange(MPU6050_RANGE_250_DEG);
-        mpu.setFilterBandwidth(MPU6050_BAND_10_HZ);
+        mpu.setFilterBandwidth(MPU6050_BAND_5_HZ);
         mpuReady = true;
 
         float sum = 0;

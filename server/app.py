@@ -12,9 +12,6 @@ Dashboard: http://localhost:5000  (or your cloud URL)
 
 import os
 import json
-import re
-import subprocess
-import threading
 from flask import Flask, render_template, request, jsonify
 from collections import deque
 import time
@@ -47,7 +44,8 @@ robot_state = {
     "target_reached": False,
     "backtracking": False,
     "crumbs": 0,
-    "compass_ok": False, "mpu_ok": False,
+    "compass_ok": False, "mpu_ok": False, "enc_healthy": True,
+    "grid": "",
     "connected": False,
     "last_update": 0,
     "debug_mode": False,
@@ -415,52 +413,10 @@ def _public_ip(timeout=1.5):
     return None
 
 
-def _start_cloudflare_tunnel(port, timeout=20):
-    """Start a quick cloudflared tunnel. Returns the public URL or None."""
-    try:
-        proc = subprocess.Popen(
-            ["cloudflared", "tunnel", "--url", f"http://localhost:{port}"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-    except FileNotFoundError:
-        return None
-
-    url_holder = [None]
-    pattern = re.compile(r'https://[a-z0-9-]+\.trycloudflare\.com')
-
-    def _read():
-        for line in proc.stderr:
-            m = pattern.search(line)
-            if m:
-                url_holder[0] = m.group(0)
-                break
-
-    t = threading.Thread(target=_read, daemon=True)
-    t.start()
-    t.join(timeout=timeout)
-
-    if url_holder[0] is None:
-        proc.terminate()
-        return None
-
-    # Drain stderr in background so the pipe doesn't block cloudflared
-    threading.Thread(
-        target=lambda: [_ for _ in proc.stderr], daemon=True
-    ).start()
-
-    return url_holder[0]
-
-
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 25565))
-
-    # Auto-start cloudflare tunnel (skip if URL already provided)
-    cloudflare_url = os.environ.get("CLOUDFLARE_URL")
-    if not cloudflare_url:
-        print("  Starting Cloudflare tunnel (up to 20s)...")
-        cloudflare_url = _start_cloudflare_tunnel(port)
+    ddns = os.environ.get("DDNS_HOST", "blackwise.thddns.net")
+    ddns_port = os.environ.get("DDNS_PORT", "5570")
 
     print("=" * 60)
     print("  4WD Robot Server")
@@ -469,15 +425,10 @@ if __name__ == "__main__":
     print(f"  Local:      http://localhost:{port}")
     for ip in _lan_ips():
         print(f"  LAN:        http://{ip}:{port}")
+    print(f"  DDNS:       http://{ddns}:{ddns_port}")
     pub = _public_ip()
     if pub:
-        print(f"  Public IP:  http://{pub}:{port}  (needs port-forward on your router)")
-    else:
-        print(f"  Public IP:  <offline or lookup failed>")
-    if cloudflare_url:
-        print(f"  Cloudflare: {cloudflare_url}")
-    else:
-        print(f"  Cloudflare: <cloudflared not found -- install from https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/>")
+        print(f"  Public IP:  {pub}")
     print("=" * 60)
 
     app.run(host="0.0.0.0", port=port, debug=os.environ.get("FLASK_DEBUG") == "1", threaded=True)

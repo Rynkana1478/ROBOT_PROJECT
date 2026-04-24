@@ -49,7 +49,7 @@ struct TelemetryData {
     int gridX, gridY, targetGX, targetGY;
     float targetWX, targetWY;
     int crumbs;
-    bool mpuOk;
+    bool mpuOk, encoderHealthy;
 } telemetry;
 
 struct Command {
@@ -58,6 +58,9 @@ struct Command {
     bool pending;
 } pendingCmd = {"none", 0, 0, false};
 portMUX_TYPE cmdMux = portMUX_INITIALIZER_UNLOCKED;
+
+static char gridRLEBuf[3072];
+static int gridRLELen = 0;
 
 // --- WiFi / HTTP ---
 WiFiClientSecure secureClient;
@@ -209,6 +212,11 @@ void loop() {
             telemetry.targetWY = pathfinder.targetWorldY;
             telemetry.crumbs  = pathfinder.crumbCount;
             telemetry.mpuOk   = sensors.mpuReady;
+            telemetry.encoderHealthy = encoder.encoderHealthy;
+            if (pathfinder.gridDirty) {
+                gridRLELen = pathfinder.encodeGridRLE(gridRLEBuf, sizeof(gridRLEBuf));
+                pathfinder.gridDirty = false;
+            }
             xSemaphoreGive(stateMutex);
         }
     }
@@ -253,9 +261,11 @@ void core0Task(void* param) {
             }
 
             unsigned long now = millis();
-            if (now - lastSync >= SYNC_INTERVAL_MS) {
+            unsigned long syncInt = autonomousMode ? SYNC_INTERVAL_AUTO_MS : SYNC_INTERVAL_MANUAL_MS;
+            unsigned long telInt = autonomousMode ? TELEMETRY_AUTO_MS : TELEMETRY_MANUAL_MS;
+            if (now - lastSync >= syncInt) {
                 lastSync = now;
-                bool sendTel = (now - lastTelemetry >= TELEMETRY_INTERVAL_MS);
+                bool sendTel = (now - lastTelemetry >= telInt);
                 syncWithServer(sendTel);
                 if (sendTel) lastTelemetry = now;
             }
@@ -338,6 +348,14 @@ void syncWithServer(bool includeTelemetry) {
         doc["wifi_rssi"] = WiFi.RSSI();
         doc["free_heap"] = ESP.getFreeHeap();
         doc["uptime"]    = millis() / 1000;
+        doc["enc_healthy"] = telemetry.encoderHealthy;
+        if (gridRLELen > 0) {
+            static char localGrid[3072];
+            memcpy(localGrid, gridRLEBuf, gridRLELen);
+            localGrid[gridRLELen] = '\0';
+            gridRLELen = 0;
+            doc["grid"] = (const char*)localGrid;
+        }
         xSemaphoreGive(stateMutex);
     }
 

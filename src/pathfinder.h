@@ -25,6 +25,7 @@ struct GridPoint { int x, y; };
 #define CELL_FREE     0
 #define CELL_OBSTACLE 1
 #define CELL_UNKNOWN  2
+#define CELL_VISITED  3
 
 // Movement costs (x10 for integer math)
 #define COST_CARDINAL   10    // N/S/E/W
@@ -53,6 +54,7 @@ public:
     float targetWorldY = 0;
     bool  hasTarget = false;
     bool  targetReached = false;
+    bool  gridDirty = false;
 
     // Breadcrumbs
     float crumbX[MAX_CRUMBS];
@@ -69,6 +71,7 @@ public:
         targetReached = false;
         crumbCount = 0;
         backtrackIdx = -1;
+        gridDirty = true;
         worldOriginX = -(GRID_SIZE / 2) * CELL_SIZE_CM;
         worldOriginY = -(GRID_SIZE / 2) * CELL_SIZE_CM;
     }
@@ -109,7 +112,8 @@ public:
 
         if (inBounds(gx, gy)) {
             robotPos = {gx, gy};
-            grid[gy][gx] = CELL_FREE;
+            grid[gy][gx] = CELL_VISITED;
+            gridDirty = true;
         }
 
         if (hasTarget) updateTargetGrid();
@@ -135,6 +139,7 @@ public:
 
         if (inBounds(ox, oy)) {
             grid[oy][ox] = CELL_OBSTACLE;
+            gridDirty = true;
         }
         markLineFree(robotPos.x, robotPos.y, ox, oy);
     }
@@ -307,6 +312,27 @@ public:
 
     bool isBacktracking() { return backtrackIdx >= 0; }
 
+    int encodeGridRLE(char* buf, int maxLen) {
+        int pos = 0;
+        uint8_t cur = grid[0][0];
+        int count = 1;
+        for (int i = 1; i < GRID_SIZE * GRID_SIZE; i++) {
+            uint8_t cell = grid[i / GRID_SIZE][i % GRID_SIZE];
+            if (cell == cur) {
+                count++;
+            } else {
+                int w = snprintf(buf + pos, maxLen - pos, "%d,%d,", cur, count);
+                if (w < 0 || pos + w >= maxLen - 12) return pos;
+                pos += w;
+                cur = cell;
+                count = 1;
+            }
+        }
+        int w = snprintf(buf + pos, maxLen - pos, "%d,%d", cur, count);
+        if (w > 0) pos += w;
+        return pos;
+    }
+
 private:
     bool inBounds(int x, int y) {
         return x >= 0 && x < GRID_SIZE && y >= 0 && y < GRID_SIZE;
@@ -451,8 +477,9 @@ private:
         int err = dx - dy;
 
         while (x0 != x1 || y0 != y1) {
-            if (inBounds(x0, y0) && grid[y0][x0] != CELL_OBSTACLE) {
+            if (inBounds(x0, y0) && grid[y0][x0] != CELL_OBSTACLE && grid[y0][x0] != CELL_VISITED) {
                 grid[y0][x0] = CELL_FREE;
+                gridDirty = true;
             }
             int e2 = 2 * err;
             if (e2 > -dy) { err -= dy; x0 += sx; }
@@ -473,6 +500,7 @@ private:
         memcpy(grid, temp, sizeof(grid));
         worldOriginX += sx * CELL_SIZE_CM;
         worldOriginY += sy * CELL_SIZE_CM;
+        gridDirty = true;
     }
 
     void dropCrumb(float wx, float wy) {

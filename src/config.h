@@ -86,13 +86,16 @@
 #define SERVO_SETTLE_MS     80
 
 // --- Heading ---
-#define GYRO_DEADZONE       0.3   // deg/s - ignore below this
-#define GYRO_MAX_RATE       300.0 // deg/s - reject spikes above this
+#define GYRO_DEADZONE       0.5   // deg/s - motor vibration noise reaches ±0.7
+#define GYRO_MAX_RATE       150.0 // deg/s - reject spikes above this
+#define GYRO_JUMP_LIMIT     50.0  // deg/s - max change between consecutive reads
+#define ACCEL_Z_MIN         2.0   // m/s² - gravity check (low: allows ~80° tilt in turns)
+#define ACCEL_Z_MAX         18.0  // m/s² - gravity check (high: allows vibration spikes)
 
 // --- Encoder ---
 #define TICKS_PER_REV       20
-#define WHEEL_CIRCUMF_CM    20.42  // PI * 6.5cm
-#define CM_PER_TICK          1.021
+#define WHEEL_CIRCUMF_CM    20.74  // PI * 6.6cm (66mm wheel)
+#define CM_PER_TICK          1.037
 #define WHEEL_BASE_CM       15.0   // distance between left and right wheels
 
 // --- Breadcrumbs ---
@@ -103,8 +106,10 @@
 // Copy secrets.example.h -> secrets.h and fill it in before building.
 #include "secrets.h"
 
-#define SYNC_INTERVAL_MS      100   // command poll rate (fast)
-#define TELEMETRY_INTERVAL_MS 1000  // full telemetry push rate (slow)
+#define SYNC_INTERVAL_MANUAL_MS   50    // manual: 20Hz command poll
+#define SYNC_INTERVAL_AUTO_MS     500   // auto: 2Hz command poll
+#define TELEMETRY_MANUAL_MS       500   // manual: telemetry every 500ms
+#define TELEMETRY_AUTO_MS         2000  // auto: telemetry every 2s
 #define HTTP_TIMEOUT_MS       200   // max wait for server response
 
 // --- Debug ---

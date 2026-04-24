@@ -9,7 +9,7 @@ if errorlevel 1 (
 )
 
 set PORT=25565
-rem Cloudflare tunnel starts automatically if cloudflared is installed.
-rem To use a manually-started tunnel instead: set CLOUDFLARE_URL=https://your-tunnel.trycloudflare.com
+set DDNS_HOST=blackwise.thddns.net
+set DDNS_PORT=5570
 python app.py
 pause

@@ -563,6 +563,9 @@
                 <div class="map-legend">
                     <span><span class="legend-dot" style="background:#C96442"></span>Robot</span>
                     <span><span class="legend-dot" style="background:#1A73C4"></span>Target</span>
+                    <span><span class="legend-dot" style="background:#C8E6C9"></span>Free</span>
+                    <span><span class="legend-dot" style="background:#8D6E63"></span>Obstacle</span>
+                    <span><span class="legend-dot" style="background:#BBDEFB"></span>Visited</span>
                 </div>
                 <div class="map-note">Grid follows the robot. Unlimited range.</div>
             </div>
@@ -652,6 +655,8 @@
 const GRID_SIZE = {{ grid_size }};
 let debugLogIndex = 0;
 let chatIndex = 0;
+let gridCells = null;
+let lastGridRLE = '';
 
 function fetchDashboard() {
     fetch('/api/dashboard?debug_since=' + debugLogIndex + '&chat_since=' + chatIndex)
@@ -707,7 +712,7 @@ function updateDashboard(d) {
     document.getElementById('position').textContent = d.pos_x.toFixed(1) + ', ' + d.pos_y.toFixed(1);
     document.getElementById('gridPos').textContent = d.grid_x + ', ' + d.grid_y;
     document.getElementById('totalDist').textContent = d.distance.toFixed(0) + ' cm';
-    document.getElementById('encTicks').textContent = (d.enc_l||0) + ' / ' + (d.enc_r||0);
+    // encTicks updated in adaptive section below
     document.getElementById('crumbs').textContent = d.crumbs;
 
     const battEl = document.getElementById('battery');
@@ -738,6 +743,28 @@ function updateDashboard(d) {
     document.getElementById('heap').textContent = d.free_heap ? (d.free_heap / 1024).toFixed(1) + 'KB' : '--';
     if (d.uptime) { const m = Math.floor(d.uptime/60); document.getElementById('uptime').textContent = m + 'm' + (d.uptime%60) + 's'; }
 
+    if (d.grid && d.grid.length > 0 && d.grid !== lastGridRLE) {
+        gridCells = decodeGridRLE(d.grid);
+        lastGridRLE = d.grid;
+    }
+
+    const encEl = document.getElementById('encTicks');
+    encEl.textContent = (d.enc_l||0) + ' / ' + (d.enc_r||0);
+    if (d.enc_healthy === false) {
+        encEl.style.color = '#C5221F';
+        encEl.title = 'L/R encoder imbalance';
+    } else {
+        encEl.style.color = '';
+        encEl.title = '';
+    }
+
+    const targetRate = d.auto ? 1000 : 250;
+    if (targetRate !== currentPollRate) {
+        clearInterval(pollTimer);
+        currentPollRate = targetRate;
+        pollTimer = setInterval(fetchDashboard, currentPollRate);
+    }
+
     drawGrid(d);
 }
 
@@ -754,6 +781,20 @@ function setDisconnected() {
     document.getElementById('connStatus').className = 'conn-badge conn-off';
 }
 
+function decodeGridRLE(rle) {
+    const parts = rle.split(',').map(Number);
+    const grid = new Uint8Array(GRID_SIZE * GRID_SIZE);
+    let idx = 0;
+    for (let i = 0; i < parts.length - 1; i += 2) {
+        const val = parts[i];
+        const count = parts[i + 1];
+        for (let j = 0; j < count && idx < grid.length; j++) {
+            grid[idx++] = val;
+        }
+    }
+    return grid;
+}
+
 function drawGrid(d) {
     const canvas = document.getElementById('gridMap');
     const ctx = canvas.getContext('2d');
@@ -763,6 +804,19 @@ function drawGrid(d) {
     // Warm background
     ctx.fillStyle = '#F7F3ED';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Grid cells from RLE data
+    if (gridCells) {
+        const cellColors = ['#C8E6C9', '#8D6E63', null, '#BBDEFB'];
+        for (let i = 0; i < gridCells.length; i++) {
+            const c = cellColors[gridCells[i]];
+            if (!c) continue;
+            const x = i % GRID_SIZE;
+            const y = Math.floor(i / GRID_SIZE);
+            ctx.fillStyle = c;
+            ctx.fillRect(x * cellW, y * cellH, cellW, cellH);
+        }
+    }
 
     // Grid lines
     ctx.strokeStyle = '#E8E0D4';
@@ -1045,7 +1099,8 @@ function stopVoice() {
     if (recognition) { try { recognition.stop(); } catch(e) {} }
 }
 
-setInterval(fetchDashboard, 500);
+let currentPollRate = 500;
+let pollTimer = setInterval(fetchDashboard, currentPollRate);
 setInterval(updateAIStatus, 5000);
 fetchDashboard();
 updateAIStatus();
