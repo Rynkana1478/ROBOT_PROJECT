@@ -20,7 +20,6 @@
             line-height: 1.5;
         }
 
-        /* Header */
         header {
             display: flex;
             justify-content: space-between;
@@ -48,6 +47,11 @@
             font-weight: 600;
             color: #2D2B28;
         }
+        .header-badges {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
         .conn-badge {
             padding: 5px 14px;
             border-radius: 20px;
@@ -58,14 +62,41 @@
         .conn-ok { background: #E6F4EA; color: #1B7D3E; }
         .conn-off { background: #FCE8E6; color: #C5221F; }
 
-        /* Layout */
+        .batt-warning {
+            display: none;
+            padding: 5px 14px;
+            border-radius: 20px;
+            font-size: 0.78em;
+            font-weight: 600;
+            background: #FCE8E6;
+            color: #C5221F;
+            animation: blink 1s infinite;
+        }
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .control-badge {
+            padding: 5px 14px;
+            border-radius: 20px;
+            font-size: 0.78em;
+            font-weight: 500;
+        }
+        .ctrl-auto { background: #E3F2FD; color: #1565B0; }
+        .ctrl-manual { background: #FFF3E0; color: #C96442; }
+        .ctrl-avoid { background: #FCE8E6; color: #C5221F; animation: pulse-avoid 1s infinite; }
+        @keyframes pulse-avoid {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(197,34,31,0.3); }
+            50% { box-shadow: 0 0 0 6px rgba(197,34,31,0); }
+        }
+
         .layout {
             display: grid;
             grid-template-columns: 1fr 1fr 1fr;
             gap: 16px;
         }
 
-        /* Card */
         .card {
             background: #FFFCF8;
             border: 1px solid #E8E0D4;
@@ -81,7 +112,6 @@
             margin-bottom: 14px;
         }
 
-        /* Stats */
         .stat-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -114,7 +144,6 @@
         .mode-auto { color: #1A73C4; }
         .mode-manual { color: #C96442; }
 
-        /* Buttons */
         .btn {
             padding: 10px 16px;
             border: 1px solid #E0D6CA;
@@ -163,7 +192,6 @@
         .btn-row { display: flex; gap: 8px; }
         .btn-row .btn { flex: 1; text-align: center; }
 
-        /* Destination */
         .dest-form { display: flex; flex-direction: column; gap: 10px; }
         .input-group {
             display: flex;
@@ -202,7 +230,6 @@
         .info-box .reached { color: #1B7D3E; }
         .info-box .tracking { color: #D4923A; }
 
-        /* D-Pad */
         .control-pad {
             display: grid;
             grid-template-columns: 1fr 1fr 1fr;
@@ -254,7 +281,6 @@
             border: 1px solid #D8CFBF;
         }
 
-        /* Grid map */
         .grid-map-container { margin-top: 12px; }
         canvas#gridMap {
             border: 1px solid #E0D6CA;
@@ -279,7 +305,6 @@
         }
         .map-note { font-size: 0.72em; color: #B8AD9E; margin-top: 4px; }
 
-        /* AI Panel */
         .ai-section {
             margin-top: 16px;
             display: grid;
@@ -404,7 +429,6 @@
             .ai-bubble { margin-left: 10px; margin-right: 10px; }
         }
 
-        /* Debug panel */
         .debug-section {
             display: grid;
             grid-template-columns: 1fr 1fr 1fr;
@@ -453,7 +477,6 @@
             color: #A09685;
         }
 
-        /* Responsive */
         @media (max-width: 960px) {
             .layout { grid-template-columns: 1fr; }
             .debug-section { grid-template-columns: 1fr; }
@@ -470,7 +493,14 @@
             <div class="logo-icon">R</div>
             <h1>Robot Dashboard <span id="chassisId" style="font-size:0.7em;color:#8B7E6A;font-weight:400"></span></h1>
         </div>
-        <div id="connStatus" class="conn-badge conn-off">Disconnected</div>
+        <div class="header-badges">
+            <div id="battWarning" class="batt-warning">BATTERY LOW</div>
+            <div id="slipWarning" class="batt-warning" style="display:none;background:#FFF3E0;color:#D4923A">SLIP</div>
+            <div id="stallWarning" class="batt-warning" style="display:none;background:#FCE8E6;color:#C5221F">STALL</div>
+            <div id="bootWarning" class="batt-warning" style="display:none;background:#FFF3E0;color:#D4923A">FRESH BOOT — recalibrate</div>
+            <div id="controlBadge" class="control-badge ctrl-auto">Auto</div>
+            <div id="connStatus" class="conn-badge conn-off">Disconnected</div>
+        </div>
     </header>
 
     <div class="layout">
@@ -495,6 +525,14 @@
                     <div class="value" id="distRight">--</div>
                 </div>
                 <div class="stat">
+                    <div class="label">Near Left</div>
+                    <div class="value" id="distNearLeft">--</div>
+                </div>
+                <div class="stat">
+                    <div class="label">Near Right</div>
+                    <div class="value" id="distNearRight">--</div>
+                </div>
+                <div class="stat">
                     <div class="label">Position</div>
                     <div class="value" id="position">--</div>
                 </div>
@@ -515,20 +553,28 @@
                     <div class="value" id="battery">--</div>
                 </div>
                 <div class="stat">
-                    <div class="label">Path</div>
-                    <div class="value" id="pathLen">--</div>
-                </div>
-                <div class="stat">
-                    <div class="label">State</div>
-                    <div class="value" id="avoidState">--</div>
-                </div>
-                <div class="stat">
                     <div class="label">Crumbs</div>
                     <div class="value" id="crumbs">--</div>
                 </div>
-                <div class="stat wide">
+                <div class="stat">
+                    <div class="label">Traction</div>
+                    <div class="value" id="traction">--</div>
+                </div>
+                <div class="stat">
                     <div class="label">Mode</div>
                     <div class="value" id="mode">--</div>
+                </div>
+                <div class="stat">
+                    <div class="label">Navigator</div>
+                    <div class="value" id="navState">--</div>
+                </div>
+                <div class="stat">
+                    <div class="label">Queue</div>
+                    <div class="value" id="queueDepth">0</div>
+                </div>
+                <div class="stat">
+                    <div class="label">Last Cmd</div>
+                    <div class="value" id="lastCmd">--</div>
                 </div>
             </div>
         </div>
@@ -584,13 +630,23 @@
             <div class="action-buttons">
                 <button class="btn btn-accent" onclick="sendCmd('auto')">Autonomous</button>
                 <button class="btn btn-secondary" onclick="sendCmd('backtrack')">Backtrack Home</button>
-                <button class="btn" onclick="sendCmd('reset')">Reset Position</button>
+                <button class="btn btn-primary" onclick="sendCmd('reset')">Reset Position + Heading</button>
+                <button class="btn" onclick="sendCmd('calibrate')">Calibrate Heading (0°)</button>
+                <button class="btn" onclick="setHeadingPrompt()">North Pin (set heading)</button>
+                <button class="btn btn-danger" onclick="sendCmd('clear_map')">Clear Map</button>
+                <button class="btn btn-danger" onclick="clearQueue()">Clear Queue</button>
             </div>
             <div class="hint">
                 <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> drive
                 <kbd>Space</kbd> stop
                 <kbd>B</kbd> backtrack
                 <kbd>R</kbd> reset
+            </div>
+            <div style="margin-top:10px;font-size:0.72em;color:#A09685;background:#F7F3ED;padding:8px 10px;border-radius:8px">
+                <strong>LAN Access:</strong><br>
+                {% for ip in lan_ips %}
+                http://{{ ip }}:{{ server_port }}<br>
+                {% endfor %}
             </div>
         </div>
     </div>
@@ -635,7 +691,6 @@
                 <button class="btn btn-test-all" onclick="sendCmd('test_all')">Run All Tests</button>
                 <button class="btn" onclick="sendCmd('test_i2c')">I2C Bus Scan</button>
                 <button class="btn" onclick="sendCmd('test_mpu')">MPU6050</button>
-                <button class="btn" onclick="sendCmd('test_compass')">Compass</button>
                 <button class="btn" onclick="sendCmd('test_ultrasonic')">Ultrasonic</button>
                 <button class="btn" onclick="sendCmd('test_servo')">Servo</button>
                 <button class="btn" onclick="sendCmd('test_motors')">Motors</button>
@@ -653,11 +708,85 @@
 
 <script>
 const GRID_SIZE = {{ grid_size }};
+const CELL_SIZE_CM = 10;
 let debugLogIndex = 0;
 let chatIndex = 0;
 let gridCells = null;
 let lastGridRLE = '';
+let lastData = null;
 
+// =============================================
+// PREDICTION ENGINE
+// =============================================
+const pred = {
+    posX: 0, posY: 0,
+    velX: 0, velY: 0,
+    heading: 0,
+    gridX: GRID_SIZE/2, gridY: GRID_SIZE/2,
+    targetX: GRID_SIZE/2, targetY: GRID_SIZE/2,
+    hasTarget: false,
+    renderX: GRID_SIZE/2, renderY: GRID_SIZE/2,
+    renderHeading: 0,
+    lastUpdateTime: 0,
+    dataGridX: GRID_SIZE/2, dataGridY: GRID_SIZE/2,
+};
+
+function updatePrediction(d) {
+    const now = performance.now();
+    const dt = (now - pred.lastUpdateTime) / 1000;
+
+    if (pred.lastUpdateTime > 0 && dt > 0.05 && dt < 5) {
+        pred.velX = (d.pos_x - pred.posX) / dt;
+        pred.velY = (d.pos_y - pred.posY) / dt;
+    }
+
+    pred.posX = d.pos_x;
+    pred.posY = d.pos_y;
+    pred.heading = d.heading;
+    pred.dataGridX = d.grid_x;
+    pred.dataGridY = d.grid_y;
+    pred.targetX = d.target_x;
+    pred.targetY = d.target_y;
+    pred.hasTarget = d.has_target;
+    pred.lastUpdateTime = now;
+}
+
+function renderLoop() {
+    const now = performance.now();
+    const dt = (now - pred.lastUpdateTime) / 1000;
+
+    // Predict position using velocity (clamp dt to prevent wild extrapolation)
+    const clampedDt = Math.min(dt, 1.0);
+    const predPosX = pred.posX + pred.velX * clampedDt;
+    const predPosY = pred.posY + pred.velY * clampedDt;
+
+    // Convert predicted world position offset to grid offset
+    const offsetCellsX = (predPosX - pred.posX) / CELL_SIZE_CM;
+    const offsetCellsY = (predPosY - pred.posY) / CELL_SIZE_CM;
+    const predGridX = pred.dataGridX + offsetCellsX;
+    const predGridY = pred.dataGridY + offsetCellsY;
+
+    // Lerp render position toward predicted position (smooth following)
+    pred.renderX += (predGridX - pred.renderX) * 0.25;
+    pred.renderY += (predGridY - pred.renderY) * 0.25;
+    pred.renderHeading += angleDiffJS(pred.heading, pred.renderHeading) * 0.3;
+
+    if (lastData) drawGrid(lastData, pred.renderX, pred.renderY, pred.renderHeading);
+    requestAnimationFrame(renderLoop);
+}
+
+function angleDiffJS(target, current) {
+    let d = target - current;
+    while (d > 180) d -= 360;
+    while (d < -180) d += 360;
+    return d;
+}
+
+requestAnimationFrame(renderLoop);
+
+// =============================================
+// DATA FETCHING
+// =============================================
 function fetchDashboard() {
     fetch('/api/dashboard?debug_since=' + debugLogIndex + '&chat_since=' + chatIndex)
         .then(r => r.json())
@@ -695,6 +824,9 @@ function fetchDashboard() {
 }
 
 function updateDashboard(d) {
+    lastData = d;
+    updatePrediction(d);
+
     const conn = document.getElementById('connStatus');
     conn.textContent = d.connected ? 'Connected' : 'Disconnected';
     conn.className = 'conn-badge ' + (d.connected ? 'conn-ok' : 'conn-off');
@@ -704,40 +836,93 @@ function updateDashboard(d) {
         chassisEl.textContent = '(' + d.chassis_id + ')';
     }
 
+    // Battery warning
+    const battWarn = document.getElementById('battWarning');
+    battWarn.style.display = d.batt_low ? 'block' : 'none';
+
+    // Control state badge — shows mode + AVOID overlay
+    const ctrlBadge = document.getElementById('controlBadge');
+    const mode = d.robot_mode || d.mode || (d.auto ? 'auto' : 'manual');
+    if (d.avoid_active) {
+        ctrlBadge.textContent = 'AVOID';
+        ctrlBadge.className = 'control-badge ctrl-avoid';
+    } else if (mode === 'manual') {
+        ctrlBadge.textContent = 'Manual';
+        ctrlBadge.className = 'control-badge ctrl-manual';
+    } else {
+        ctrlBadge.textContent = 'Auto';
+        ctrlBadge.className = 'control-badge ctrl-auto';
+    }
+
     setDist('distFront', d.front);
     setDist('distLeft', d.left);
     setDist('distRight', d.right);
+    setDist('distNearLeft', d.near_left || 999);
+    setDist('distNearRight', d.near_right || 999);
 
-    document.getElementById('heading').textContent = d.heading.toFixed(1) + '\u00B0';
+    document.getElementById('heading').textContent = d.heading.toFixed(1) + '°';
     document.getElementById('position').textContent = d.pos_x.toFixed(1) + ', ' + d.pos_y.toFixed(1);
     document.getElementById('gridPos').textContent = d.grid_x + ', ' + d.grid_y;
     document.getElementById('totalDist').textContent = d.distance.toFixed(0) + ' cm';
-    // encTicks updated in adaptive section below
     document.getElementById('crumbs').textContent = d.crumbs;
 
     const battEl = document.getElementById('battery');
     battEl.textContent = d.battery.toFixed(1) + 'V';
     battEl.style.color = d.battery < 6.5 ? '#C5221F' : '#3D3929';
 
-    document.getElementById('pathLen').textContent = d.path_length + ' steps';
-    document.getElementById('avoidState').textContent = d.state_name;
+    // Navigator state
+    const navEl = document.getElementById('navState');
+    const ns = d.nav_state || 'IDLE';
+    navEl.textContent = ns;
+    if (ns === 'AVOIDING') navEl.style.color = '#C5221F';
+    else if (ns === 'DRIVING') navEl.style.color = '#1B7D3E';
+    else if (ns === 'TURNING') navEl.style.color = '#D4923A';
+    else navEl.style.color = '';
+
+    // Traction / slip / stall / boot
+    const tractionEl = document.getElementById('traction');
+    const tractionVal = d.traction !== undefined ? d.traction : 1.0;
+    tractionEl.textContent = (tractionVal * 100).toFixed(0) + '%';
+    if (d.slipping) { tractionEl.style.color = '#C5221F'; }
+    else if (tractionVal < 0.8) { tractionEl.style.color = '#D4923A'; }
+    else { tractionEl.style.color = '#1B7D3E'; }
+    document.getElementById('slipWarning').style.display = d.slipping ? 'block' : 'none';
+    document.getElementById('stallWarning').style.display = d.stalled ? 'block' : 'none';
+    document.getElementById('bootWarning').style.display = d.fresh_boot ? 'block' : 'none';
+
+    // Queue + last completion
+    const qDepth = (d.server_queue_size || 0) + (d.queue_size || 0);
+    const qEl = document.getElementById('queueDepth');
+    qEl.textContent = qDepth + (d.current_target_id ? ' (act #' + d.current_target_id + ')' : '');
+    qEl.style.color = qDepth > 0 ? '#D4923A' : '';
+
+    const lastCmdEl = document.getElementById('lastCmd');
+    if (d.last_completed_id) {
+        lastCmdEl.textContent = '#' + d.last_completed_id + ' ' + (d.last_completion_status || '');
+        lastCmdEl.style.color = (d.last_completion_status === 'REACHED') ? '#1B7D3E' : '#C5221F';
+    } else {
+        lastCmdEl.textContent = '--';
+    }
 
     const modeEl = document.getElementById('mode');
-    if (d.backtracking)   { modeEl.textContent = 'Backtracking'; modeEl.className = 'value'; modeEl.style.color = '#D4923A'; }
-    else if (d.auto)      { modeEl.textContent = 'Autonomous';   modeEl.className = 'value mode-auto'; modeEl.style.color = ''; }
-    else                  { modeEl.textContent = 'Manual';        modeEl.className = 'value mode-manual'; modeEl.style.color = ''; }
+    const m = d.robot_mode || d.mode || (d.auto ? 'auto' : 'manual');
+    if (d.backtracking)     { modeEl.textContent = 'Backtracking'; modeEl.style.color = '#D4923A'; }
+    else if (m === 'auto')  { modeEl.textContent = 'Autonomous';   modeEl.style.color = '#1A73C4'; }
+    else                    { modeEl.textContent = 'Manual';       modeEl.style.color = '#C96442'; }
 
     const targetEl = document.getElementById('curTarget');
     targetEl.textContent = d.has_target ? 'X:' + d.target_wx.toFixed(0) + ' Y:' + d.target_wy.toFixed(0) + ' cm' : 'none';
 
     const statusEl = document.getElementById('targetStatus');
-    if (d.backtracking) { statusEl.textContent = 'Backtracking... (' + d.crumbs + ' crumbs)'; statusEl.className = 'tracking'; }
-    else if (d.target_reached) { statusEl.textContent = 'Target reached'; statusEl.className = 'reached'; }
+    if (d.stuck) { statusEl.textContent = 'STUCK! Auto-stopping'; statusEl.className = ''; statusEl.style.color = '#C5221F'; }
+    else if (d.backtracking) { statusEl.textContent = 'Backtracking... (' + d.crumbs + ' crumbs)'; statusEl.className = 'tracking'; statusEl.style.color = ''; }
+    else if (d.target_reached) { statusEl.textContent = 'Target reached'; statusEl.className = 'reached'; statusEl.style.color = ''; }
     else if (d.has_target) {
         const dist = Math.sqrt((d.target_wx-d.pos_x)**2 + (d.target_wy-d.pos_y)**2);
         statusEl.textContent = 'Navigating... ' + dist.toFixed(0) + ' cm away';
         statusEl.className = 'tracking';
-    } else { statusEl.textContent = 'No target set'; statusEl.className = ''; }
+        statusEl.style.color = '';
+    } else { statusEl.textContent = 'No target set'; statusEl.className = ''; statusEl.style.color = ''; }
 
     document.getElementById('rssi').textContent = (d.wifi_rssi || '--') + ' dBm';
     document.getElementById('heap').textContent = d.free_heap ? (d.free_heap / 1024).toFixed(1) + 'KB' : '--';
@@ -758,14 +943,13 @@ function updateDashboard(d) {
         encEl.title = '';
     }
 
-    const targetRate = d.auto ? 1000 : 250;
+    const isAuto = (d.robot_mode || d.mode) === 'auto';
+    const targetRate = isAuto ? 1000 : 250;
     if (targetRate !== currentPollRate) {
         clearInterval(pollTimer);
         currentPollRate = targetRate;
         pollTimer = setInterval(fetchDashboard, currentPollRate);
     }
-
-    drawGrid(d);
 }
 
 function setDist(id, val) {
@@ -795,30 +979,32 @@ function decodeGridRLE(rle) {
     return grid;
 }
 
-function drawGrid(d) {
+// =============================================
+// GRID RENDERING (called from prediction loop)
+// =============================================
+function drawGrid(d, robotX, robotY, robotHeading) {
     const canvas = document.getElementById('gridMap');
     const ctx = canvas.getContext('2d');
     const cellW = canvas.width / GRID_SIZE;
     const cellH = canvas.height / GRID_SIZE;
 
-    // Warm background
     ctx.fillStyle = '#F7F3ED';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Grid cells from RLE data
+    // Flip Y: grid Y increases north (world up), canvas Y=0 is top
+    // So screen_y = (GRID_SIZE - 1 - gridY) to render north at top
     if (gridCells) {
         const cellColors = ['#C8E6C9', '#8D6E63', null, '#BBDEFB'];
         for (let i = 0; i < gridCells.length; i++) {
             const c = cellColors[gridCells[i]];
             if (!c) continue;
             const x = i % GRID_SIZE;
-            const y = Math.floor(i / GRID_SIZE);
+            const y = GRID_SIZE - 1 - Math.floor(i / GRID_SIZE);
             ctx.fillStyle = c;
             ctx.fillRect(x * cellW, y * cellH, cellW, cellH);
         }
     }
 
-    // Grid lines
     ctx.strokeStyle = '#E8E0D4';
     ctx.lineWidth = 0.5;
     for (let i = 0; i <= GRID_SIZE; i++) {
@@ -826,47 +1012,49 @@ function drawGrid(d) {
         ctx.beginPath(); ctx.moveTo(0, i*cellH); ctx.lineTo(canvas.width, i*cellH); ctx.stroke();
     }
 
-    // Robot (warm orange)
-    const rx = d.grid_x, ry = d.grid_y;
-    if (rx >= 0 && rx < GRID_SIZE && ry >= 0 && ry < GRID_SIZE) {
+    // Robot (interpolated position, Y flipped)
+    const rpx = robotX * cellW + cellW/2;
+    const rpy = (GRID_SIZE - 1 - robotY) * cellH + cellH/2;
+    if (robotX >= -1 && robotX <= GRID_SIZE && robotY >= -1 && robotY <= GRID_SIZE) {
         ctx.fillStyle = '#C96442';
         ctx.beginPath();
-        ctx.arc(rx*cellW + cellW/2, ry*cellH + cellH/2, cellW*0.6, 0, Math.PI*2);
+        ctx.arc(rpx, rpy, cellW*0.6, 0, Math.PI*2);
         ctx.fill();
 
-        // Heading line
-        const cx = rx*cellW + cellW/2, cy = ry*cellH + cellH/2;
-        const hRad = d.heading * Math.PI / 180;
+        const hRad = robotHeading * Math.PI / 180;
         ctx.strokeStyle = '#C96442';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(cx + cellW*1.4*Math.sin(hRad), cy - cellH*1.4*Math.cos(hRad));
+        ctx.moveTo(rpx, rpy);
+        ctx.lineTo(rpx + cellW*1.4*Math.sin(hRad), rpy - cellH*1.4*Math.cos(hRad));
         ctx.stroke();
     }
 
-    // Target (blue)
+    // Target (Y flipped)
     const tx = d.target_x, ty = d.target_y;
+    const tyFlip = GRID_SIZE - 1 - ty;
     if (tx >= 0 && tx < GRID_SIZE && ty >= 0 && ty < GRID_SIZE && d.has_target) {
         ctx.fillStyle = '#1A73C4';
         ctx.beginPath();
-        ctx.arc(tx*cellW + cellW/2, ty*cellH + cellH/2, cellW*0.5, 0, Math.PI*2);
+        ctx.arc(tx*cellW + cellW/2, tyFlip*cellH + cellH/2, cellW*0.5, 0, Math.PI*2);
         ctx.fill();
-        // Crosshair
         ctx.strokeStyle = 'white';
         ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.moveTo(tx*cellW+2, ty*cellH+cellH/2); ctx.lineTo((tx+1)*cellW-2, ty*cellH+cellH/2); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(tx*cellW+cellW/2, ty*cellH+2); ctx.lineTo(tx*cellW+cellW/2, (ty+1)*cellH-2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(tx*cellW+2, tyFlip*cellH+cellH/2); ctx.lineTo((tx+1)*cellW-2, tyFlip*cellH+cellH/2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(tx*cellW+cellW/2, tyFlip*cellH+2); ctx.lineTo(tx*cellW+cellW/2, (tyFlip+1)*cellH-2); ctx.stroke();
     } else if (d.has_target) {
         const dx = d.target_wx-d.pos_x, dy = d.target_wy-d.pos_y;
         const angle = Math.atan2(dx, dy);
         const ex = Math.min(Math.max(GRID_SIZE/2 + Math.sin(angle)*GRID_SIZE/2, 0), GRID_SIZE-1);
-        const ey = Math.min(Math.max(GRID_SIZE/2 - Math.cos(angle)*GRID_SIZE/2, 0), GRID_SIZE-1);
+        const ey = GRID_SIZE - 1 - Math.min(Math.max(GRID_SIZE/2 + Math.cos(angle)*GRID_SIZE/2, 0), GRID_SIZE-1);
         ctx.fillStyle = '#1A73C4';
         ctx.beginPath(); ctx.arc(ex*cellW+cellW/2, ey*cellH+cellH/2, 4, 0, Math.PI*2); ctx.fill();
     }
 }
 
+// =============================================
+// CONTROLS
+// =============================================
 function sendCmd(cmd) {
     fetch('/api/control', {
         method: 'POST',
@@ -909,11 +1097,27 @@ document.addEventListener('keyup', e => {
 });
 document.querySelectorAll('.control-pad .btn').forEach(b => b.addEventListener('touchstart', e => e.preventDefault()));
 
-
 function clearLogs() {
     fetch('/api/debug/clear', {method:'POST', headers:{'Content-Type':'application/json'}});
     document.getElementById('debugConsole').innerHTML = '<div class="log-line log-time">Logs cleared</div>';
     debugLogIndex = 0;
+}
+
+function clearQueue() {
+    if (!confirm('Clear all queued commands?')) return;
+    fetch('/api/queue/clear', {method:'POST', headers:{'Content-Type':'application/json'}});
+}
+
+function setHeadingPrompt() {
+    const v = prompt('Set robot heading (0-359°). 0 = north.', '0');
+    if (v === null) return;
+    const deg = parseFloat(v);
+    if (isNaN(deg)) { alert('Not a number'); return; }
+    fetch('/api/heading_set', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({deg: deg})
+    });
 }
 
 // =============================================
@@ -939,8 +1143,6 @@ function sendAI() {
         return r.json();
     })
     .then(data => {
-        // Chat polling will show the messages from server
-        // But show local feedback immediately for responsiveness
         if (data.error) {
             addAIBubble(data.error, 'error');
         }
@@ -964,8 +1166,6 @@ function addAIBubble(text, type, meta) {
     }
 
     history.scrollTop = history.scrollHeight;
-
-    // Keep last 50 bubbles
     while (history.children.length > 100) history.removeChild(history.firstChild);
 }
 
@@ -986,7 +1186,7 @@ function updateAIStatus() {
 }
 
 // =============================================
-// VOICE INPUT (Web Speech API)
+// VOICE INPUT
 // =============================================
 let recognition = null;
 let isListening = false;
@@ -1006,7 +1206,7 @@ function toggleVoice() {
     recognition = new SpeechRecognition();
     recognition.lang = document.getElementById('voiceLang').value;
     recognition.interimResults = false;
-    recognition.maxAlternatives = 3;  // Get top 3 guesses, pick best
+    recognition.maxAlternatives = 3;
     recognition.continuous = false;
 
     recognition.onstart = () => {
@@ -1016,32 +1216,25 @@ function toggleVoice() {
     };
 
     recognition.onresult = (event) => {
-        // Pick best from alternatives
         let text = event.results[0][0].transcript;
         let confidence = (event.results[0][0].confidence * 100).toFixed(0);
 
-        // Log all alternatives for debug
         for (let i = 0; i < event.results[0].length; i++) {
             const alt = event.results[0][i];
             console.log(`Voice alt ${i}: "${alt.transcript}" (${(alt.confidence*100).toFixed(0)}%)`);
         }
 
-        // If Thai, translate common direction words to English for the AI
         const lang = document.getElementById('voiceLang').value;
         if (lang === 'th-TH') {
             const thaiMap = {
-                // Directions
                 'ไปข้างหน้า': 'go forward', 'ข้างหน้า': 'forward', 'หน้า': 'forward',
                 'ถอยหลัง': 'go backward', 'ข้างหลัง': 'backward', 'หลัง': 'backward',
                 'ซ้าย': 'left', 'ไปซ้าย': 'go left',
                 'ขวา': 'right', 'ไปขวา': 'go right',
                 'เหนือ': 'north', 'ใต้': 'south', 'ตะวันออก': 'east', 'ตะวันตก': 'west',
-                // Units
                 'เมตร': 'meters', 'เซนติเมตร': 'cm', 'ซม': 'cm',
-                // Commands
                 'หยุด': 'stop', 'กลับบ้าน': 'come back', 'กลับ': 'come back',
                 'รีเซ็ต': 'reset',
-                // Numbers
                 'หนึ่ง': '1', 'สอง': '2', 'สาม': '3', 'สี่': '4', 'ห้า': '5',
                 'หก': '6', 'เจ็ด': '7', 'แปด': '8', 'เก้า': '9', 'สิบ': '10',
             };
@@ -1058,7 +1251,6 @@ function toggleVoice() {
         document.getElementById('aiInput').value = text;
         addAIBubble(`[Voice ${confidence}%] ${text}`, 'user');
 
-        // Auto-send voice result
         fetch('/api/ai/translate', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -1088,7 +1280,6 @@ function toggleVoice() {
     };
 
     recognition.onend = () => stopVoice();
-
     recognition.start();
 }
 

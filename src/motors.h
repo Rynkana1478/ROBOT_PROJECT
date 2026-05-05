@@ -4,18 +4,14 @@
 #include <Arduino.h>
 #include "config.h"
 
-// TB6612FNG motor driver for 4WD chassis
-// Separate direction pins (AIN1/AIN2) + PWM speed (PWMA)
-// STBY pin must be HIGH for driver to be active
-//
-// Direction table:
-//   AIN1=H AIN2=L -> Forward
-//   AIN1=L AIN2=H -> Backward
-//   AIN1=H AIN2=H -> Brake
-//   AIN1=L AIN2=L -> Coast
-
+// Pure state machine — no blocking calls.
+// Brain calls setState(...) to declare intent;
+// tick() applies pins/PWM each loop based on stored state.
+// Turn-kick is handled internally as a timestamped sub-state, NOT a delay().
 class Motors {
 public:
+    enum State { M_STOP, M_FORWARD, M_BACKWARD, M_TURN_L, M_TURN_R, M_BRAKE };
+
     void begin() {
         pinMode(MOTOR_L_AIN1, OUTPUT);
         pinMode(MOTOR_L_AIN2, OUTPUT);
@@ -29,67 +25,105 @@ public:
         ledcAttachPin(MOTOR_R_PWM, 1);
 
         digitalWrite(MOTOR_STBY, HIGH);
-        stop();
+        _desiredState = M_STOP;
+        _appliedState = M_STOP;
+        _desiredSpeed = 0;
+        _kickUntil = 0;
+        applyPins(M_STOP, 0);
     }
 
-    void forward(int speed = SPEED_MEDIUM) {
-        setLeft(speed);
-        setRight(speed);
+    // Declare intent. Cheap — just stores the desired state.
+    // Turn-kick is set up here but applied non-blockingly by tick().
+    void setState(State s, int speed = -1) {
+        if (speed < 0) {
+            switch (s) {
+                case M_FORWARD:  speed = SPEED_CRUISE; break;
+                case M_BACKWARD: speed = SPEED_SLOW;   break;
+                case M_TURN_L:
+                case M_TURN_R:   speed = SPEED_TURN;   break;
+                default:         speed = 0;            break;
+            }
+        }
+
+        bool isTurnTransition = (s == M_TURN_L || s == M_TURN_R) &&
+                                (_desiredState != s);
+
+        _desiredState = s;
+        _desiredSpeed = speed;
+
+        if (isTurnTransition) {
+            _kickUntil = millis() + TURN_KICK_MS;
+        } else if (s != M_TURN_L && s != M_TURN_R) {
+            _kickUntil = 0;
+        }
     }
 
-    void backward(int speed = SPEED_MEDIUM) {
-        setLeft(-speed);
-        setRight(-speed);
+    // Convenience aliases — keep existing call sites working.
+    void forward(int speed = SPEED_CRUISE)  { setState(M_FORWARD, speed); }
+    void backward(int speed = SPEED_SLOW)   { setState(M_BACKWARD, speed); }
+    void turnLeft(int speed = SPEED_TURN)   { setState(M_TURN_L, speed); }
+    void turnRight(int speed = SPEED_TURN)  { setState(M_TURN_R, speed); }
+    void brake()                             { setState(M_BRAKE, 0); }
+    void stop()                              { setState(M_STOP, 0); }
+
+    // Apply current desired state to hardware. Call every loop.
+    // Handles non-blocking turn-kick internally.
+    void tick() {
+        State s = _desiredState;
+        int  spd = _desiredSpeed;
+
+        if ((s == M_TURN_L || s == M_TURN_R) && millis() < _kickUntil) {
+            spd = TURN_KICK_SPEED;
+        }
+
+        if (s == _appliedState && spd == _appliedSpeed) return;
+        applyPins(s, spd);
+        _appliedState = s;
+        _appliedSpeed = spd;
     }
 
-    void turnLeft(int speed = SPEED_TURN) {
-        kickAndCruise(-speed, speed);
-    }
-
-    void turnRight(int speed = SPEED_TURN) {
-        kickAndCruise(speed, -speed);
-    }
-
-    void curveLeft(int speed = SPEED_MEDIUM) {
-        setLeft(speed / 3);
-        setRight(speed);
-    }
-
-    void curveRight(int speed = SPEED_MEDIUM) {
-        setLeft(speed);
-        setRight(speed / 3);
-    }
-
-    void brake() {
-        digitalWrite(MOTOR_L_AIN1, HIGH);
-        digitalWrite(MOTOR_L_AIN2, HIGH);
-        digitalWrite(MOTOR_R_BIN1, HIGH);
-        digitalWrite(MOTOR_R_BIN2, HIGH);
-        ledcWrite(0, SPEED_MAX);
-        ledcWrite(1, SPEED_MAX);
-    }
-
-    void stop() {
-        ledcWrite(0, 0);
-        ledcWrite(1, 0);
-        digitalWrite(MOTOR_L_AIN1, LOW);
-        digitalWrite(MOTOR_L_AIN2, LOW);
-        digitalWrite(MOTOR_R_BIN1, LOW);
-        digitalWrite(MOTOR_R_BIN2, LOW);
-    }
+    bool  isReversing() { return _desiredState == M_BACKWARD; }
+    State getState()    { return _desiredState; }
+    int   getSpeed()    { return _desiredSpeed; }
 
     void sleep()  { digitalWrite(MOTOR_STBY, LOW); }
     void wake()   { digitalWrite(MOTOR_STBY, HIGH); }
 
 private:
-    void kickAndCruise(int leftCruise, int rightCruise) {
-        int kickL = (leftCruise  > 0) ?  TURN_KICK_SPEED : (leftCruise  < 0 ? -TURN_KICK_SPEED : 0);
-        int kickR = (rightCruise > 0) ?  TURN_KICK_SPEED : (rightCruise < 0 ? -TURN_KICK_SPEED : 0);
-        setLeft(kickL);
-        setRight(kickR);
-        delay(TURN_KICK_MS);
-        setLeft(leftCruise);
-        setRight(rightCruise);
+    State _desiredState = M_STOP;
+    State _appliedState = M_STOP;
+    int   _desiredSpeed = 0;
+    int   _appliedSpeed = 0;
+    unsigned long _kickUntil = 0;
+
+    void applyPins(State s, int speed) {
+        switch (s) {
+            case M_FORWARD:
+                setLeft(speed);  setRight(speed);  break;
+            case M_BACKWARD:
+                setLeft(-speed); setRight(-speed); break;
+            case M_TURN_L:
+                setLeft(-speed); setRight(speed);  break;
+            case M_TURN_R:
+                setLeft(speed);  setRight(-speed); break;
+            case M_BRAKE:
+                digitalWrite(MOTOR_L_AIN1, HIGH);
+                digitalWrite(MOTOR_L_AIN2, HIGH);
+                digitalWrite(MOTOR_R_BIN1, HIGH);
+                digitalWrite(MOTOR_R_BIN2, HIGH);
+                ledcWrite(0, SPEED_MAX);
+                ledcWrite(1, SPEED_MAX);
+                break;
+            case M_STOP:
+            default:
+                digitalWrite(MOTOR_L_AIN1, LOW);
+                digitalWrite(MOTOR_L_AIN2, LOW);
+                digitalWrite(MOTOR_R_BIN1, LOW);
+                digitalWrite(MOTOR_R_BIN2, LOW);
+                ledcWrite(0, 0);
+                ledcWrite(1, 0);
+                break;
+        }
     }
 
     void setLeft(int speed) {

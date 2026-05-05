@@ -7,7 +7,6 @@
 #include <Adafruit_Sensor.h>
 #include "config.h"
 
-// Shared sweep data: Core 0 writes distances, Core 1 reads via updateFromSweep()
 struct SweepData {
     float dist[SWEEP_STEPS];
     bool  fresh;
@@ -18,12 +17,21 @@ portMUX_TYPE sweepMux  = portMUX_INITIALIZER_UNLOCKED;
 
 class Sensors {
 public:
-    float distFront = 999;
-    float distLeft  = 999;
-    float distRight = 999;
-    float heading   = 0;
+    float distFront     = 999;
+    float distLeft      = 999;
+    float distRight     = 999;
+    float distNearLeft  = 999;
+    float distNearRight = 999;
+    float sweepDist[SWEEP_STEPS];
+
+    float heading    = 0;
     float headingRad = 0;
-    float gyroRate = 0;
+    float gyroRate   = 0;
+
+    // Filtered accel along forward axis (Y per chassis mounting: Y forward, X right)
+    float accelX = 0;     // lateral
+    float accelY = 0;     // forward (used for slip detection)
+    float accelZ = 0;
 
     Adafruit_MPU6050 mpu;
 
@@ -33,13 +41,21 @@ public:
     unsigned long lastHeadingUpdate = 0;
     bool mpuReady = false;
 
+    // Auto re-cal: track stillness via RAW gyro stats so the variance check
+    // isn't biased by the (possibly wrong) offset we're trying to correct.
+    unsigned long stillSinceMs = 0;
+    float gyroRawSum   = 0;     // sum of raw g.gyro.z (rad/s)
+    float gyroRawSumSq = 0;     // sum of raw g.gyro.z² (rad²/s²)
+    int   gyroRawSamples = 0;
+    bool  motorsActiveExternal = false;  // updated each loop from main
+
     void begin() {
         pinMode(US_TRIG, OUTPUT);
         pinMode(US_ECHO, INPUT);
+        for (int i = 0; i < SWEEP_STEPS; i++) sweepDist[i] = 999;
         initMPU();
     }
 
-    // Called from Core 0 only
     float readUltrasonic() {
         digitalWrite(US_TRIG, LOW);  delayMicroseconds(2);
         digitalWrite(US_TRIG, HIGH); delayMicroseconds(10);
@@ -50,7 +66,6 @@ public:
         return (d > 400) ? 999 : d;
     }
 
-    // Called from Core 1 -- copies latest sweep data into front/left/right
     void updateFromSweep() {
         float tempDist[SWEEP_STEPS];
         portENTER_CRITICAL(&sweepMux);
@@ -62,20 +77,15 @@ public:
         sweepData.fresh = false;
         portEXIT_CRITICAL(&sweepMux);
 
-        float minFront = 999, minLeft = 999, minRight = 999;
-        for (int i = 0; i < SWEEP_STEPS; i++) {
-            int angle = SWEEP_START_ANGLE + i * SWEEP_STEP_DEG;
-            float d = tempDist[i];
-            if (angle <= 50)  { if (d < minRight) minRight = d; }
-            if (angle >= 130) { if (d < minLeft)  minLeft  = d; }
-            if (angle >= 60 && angle <= 120) { if (d < minFront) minFront = d; }
-        }
-        distFront = minFront;
-        distLeft  = minLeft;
-        distRight = minRight;
+        memcpy(sweepDist, tempDist, sizeof(sweepDist));
+
+        distFront     = tempDist[2];
+        distNearRight = tempDist[1];
+        distNearLeft  = tempDist[3];
+        distRight     = min(tempDist[0], tempDist[1]);
+        distLeft      = min(tempDist[3], tempDist[4]);
     }
 
-    // Gyro-only heading with I2C corruption detection
     void updateHeading() {
         unsigned long now = millis();
         if (lastHeadingUpdate == 0) { lastHeadingUpdate = now; return; }
@@ -86,20 +96,38 @@ public:
         if (mpuReady) {
             sensors_event_t a, g, t;
             if (mpu.getEvent(&a, &g, &t)) {
-                // Gravity sanity check: accel Z should be ~9.8 m/s²
-                // If it reads wildly off, the I2C data is corrupted
                 float az = abs(a.acceleration.z);
                 if (az < ACCEL_Z_MIN || az > ACCEL_Z_MAX) {
                     badI2Ccount++;
-                    gz = 0;  // discard entire reading
+                    gz = 0;
                 } else {
-                    gz = (g.gyro.z - gyroZOffset) * 180.0 / PI;
-                    // Reject if rate changed too fast between consecutive reads
+                    // Low-pass accel (kills motor vibration, keeps DC offset)
+                    accelX = accelX * (1 - ACCEL_LOWPASS_ALPHA) + a.acceleration.x * ACCEL_LOWPASS_ALPHA;
+                    accelY = accelY * (1 - ACCEL_LOWPASS_ALPHA) + a.acceleration.y * ACCEL_LOWPASS_ALPHA;
+                    accelZ = accelZ * (1 - ACCEL_LOWPASS_ALPHA) + a.acceleration.z * ACCEL_LOWPASS_ALPHA;
+
+                    // Sign-flipped: this chassis's MPU mount produces NEGATIVE
+                    // g.gyro.z when the chassis rotates physically clockwise
+                    // (right turn). To match calcBearing convention (0=N, 90=E,
+                    // increasing CW), heading must INCREASE for right turns.
+                    // Validated by test 08 mode 8 — without this flip the
+                    // navigator commands the wrong direction, robot spins for
+                    // 2-3 revolutions before failsafe intercepts. See test
+                    // session notes on absolute heading turn validation.
+                    gz = -(g.gyro.z - gyroZOffset) * 180.0 / PI;
                     if (abs(gz - prevGyroZ) > GYRO_JUMP_LIMIT) gz = prevGyroZ;
                     if (abs(gz) > GYRO_MAX_RATE) gz = prevGyroZ;
                     if (abs(gz) < GYRO_DEADZONE) gz = 0;
                     prevGyroZ = gz;
                     badI2Ccount = 0;
+
+                    // Auto-recal accumulator: stash raw gyro samples (rad/s) so we
+                    // can compute true variance independent of the current offset.
+                    if (!motorsActiveExternal) {
+                        gyroRawSum   += g.gyro.z;
+                        gyroRawSumSq += g.gyro.z * g.gyro.z;
+                        gyroRawSamples++;
+                    }
                 }
             } else {
                 badI2Ccount++;
@@ -112,17 +140,55 @@ public:
         while (heading >= 360) heading -= 360;
         while (heading < 0)    heading += 360;
         headingRad = heading * PI / 180.0;
+
+        // Auto-recal trigger: when motors stopped for HEADING_RECAL_STILL_MS,
+        // check raw-gyro variance (offset-independent). If the board is truly
+        // still, snap gyroZOffset to the raw mean — this can correct ANY bias,
+        // including drift that exceeded the deadzone and made heading "spin"
+        // on the dashboard.
+        if (!motorsActiveExternal) {
+            if (stillSinceMs == 0) stillSinceMs = now;
+            if (now - stillSinceMs > HEADING_RECAL_STILL_MS && gyroRawSamples > 20) {
+                float meanRad = gyroRawSum / gyroRawSamples;
+                float varRad  = gyroRawSumSq / gyroRawSamples - meanRad * meanRad;
+                // Compare in deg²/s² for readability
+                float varDeg = varRad * (180.0 / PI) * (180.0 / PI);
+                if (varDeg < HEADING_RECAL_GYRO_VAR * HEADING_RECAL_GYRO_VAR) {
+                    gyroZOffset = meanRad;
+                    prevGyroZ = 0;
+                }
+                gyroRawSum = 0;
+                gyroRawSumSq = 0;
+                gyroRawSamples = 0;
+                stillSinceMs = now;
+            }
+        } else {
+            stillSinceMs = 0;
+            gyroRawSum = 0;
+            gyroRawSumSq = 0;
+            gyroRawSamples = 0;
+        }
+    }
+
+    void resetHeading() {
+        heading = 0;
+        headingRad = 0;
+        prevGyroZ = 0;
+        lastHeadingUpdate = millis();
+    }
+
+    // Manual heading override (e.g. dashboard "north pin" snap)
+    void setHeading(float deg) {
+        while (deg >= 360) deg -= 360;
+        while (deg < 0)    deg += 360;
+        heading = deg;
+        headingRad = deg * PI / 180.0;
+        prevGyroZ = 0;
+        lastHeadingUpdate = millis();
     }
 
     bool isPathClear()     { return distFront > OBSTACLE_CLEAR; }
     bool isObstacleClose() { return distFront < OBSTACLE_CLOSE; }
-
-    int bestDirection() {
-        if (distFront > OBSTACLE_CLEAR) return 0;
-        if (distLeft > distRight && distLeft > OBSTACLE_SLOW) return -1;
-        if (distRight > distLeft && distRight > OBSTACLE_SLOW) return 1;
-        return (distLeft > distRight) ? -1 : 1;
-    }
 
     float getBatteryVoltage() {
         int raw = analogRead(BATTERY_PIN);
@@ -133,7 +199,9 @@ private:
     void initMPU() {
         if (!mpu.begin(0x68, &Wire)) return;
         mpu.setAccelerometerRange(MPU6050_RANGE_2_G);
-        mpu.setGyroRange(MPU6050_RANGE_250_DEG);
+        // 500 deg/s range: chassis tank-turns at SPEED_TURN can hit 200+ deg/s,
+        // so 250 deg/s would saturate. 500 gives 2x headroom.
+        mpu.setGyroRange(MPU6050_RANGE_500_DEG);
         mpu.setFilterBandwidth(MPU6050_BAND_5_HZ);
         mpuReady = true;
 
