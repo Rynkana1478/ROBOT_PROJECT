@@ -10,13 +10,13 @@
 │  │     Core 0           │    │        Core 1              │  │
 │  │   "Eyes + Comms"     │    │       "Brain"              │  │
 │  │                      │    │                            │  │
-│  │  Servo sweep (20°)   │    │  Read sweep → distances    │  │
-│  │  Ultrasonic read     │    │  IMU heading (gyro)        │  │
-│  │  WiFi sync           │    │  Encoder odometry          │  │
-│  │                      │    │  Obstacle avoidance        │  │
-│  │  Shared: sweepData[] │◄──►│  A* pathfinding            │  │
-│  │  Shared: command     │◄──►│  Motor control             │  │
-│  │  Shared: telemetry   │◄──►│  Command processing        │  │
+│  │  Ultrasonic fire     │    │  Servo + sweep mode FSM    │  │
+│  │  WiFi sync           │    │  Read sweep → distances    │  │
+│  │                      │    │  IMU heading (gyro)        │  │
+│  │                      │    │  Encoder odometry          │  │
+│  │  Shared: sweepData[] │◄──►│  Reactive bearing nav      │  │
+│  │  Shared: command     │◄──►│  Incremental-turn avoid    │  │
+│  │  Shared: telemetry   │◄──►│  Motor control + cmd FSM   │  │
 │  └─────────────────────┘    └───────────────────────────┘  │
 │                    │                                        │
 └────────────────────┼────────────────────────────────────────┘
@@ -65,7 +65,7 @@ setup() on Core 1
     ├── sensors.begin()                    ← MPU6050 init + 2s gyro calibration
     ├── encoder.begin()                    ← Attach interrupts on pins 13,14
     ├── avoidance.begin()                  ← Reset state machine to IDLE
-    ├── pathfinder.begin()                 ← Clear 40x40 grid
+    ├── pathfinder.begin()                 ← Clear 20x20 grid + breadcrumbs
     ├── Debug::begin()                     ← Clear log buffer
     │
     ├── setupWiFi()                        ← Connect to phone hotspot (30 attempts)
@@ -177,29 +177,26 @@ Runs as the Arduino `loop()` at 20Hz (50ms intervals).
 │  │     └── dL, dR → distance, position     │ │
 │  │     └── posX, posY in world cm          │ │
 │  │                                         │ │
-│  │  5a. AUTO MODE:                         │ │
-│  │      ├── Avoidance state machine        │ │
-│  │      │   IDLE → SLOWDOWN → BRAKE →      │ │
-│  │      │   REVERSING → TURNING → IDLE     │ │
-│  │      ├── If not avoiding:               │ │
-│  │      │   ├── Update obstacle map        │ │
-│  │      │   └── Navigate A* path           │ │
-│  │      └── Priority: Safety > Navigation  │ │
+│  │  5a. AUTO MODE (target set):            │ │
+│  │      ├── Navigator FSM:                 │ │
+│  │      │   TURNING → SCAN_AHEAD →         │ │
+│  │      │   DRIVING → AVOIDING → REACHED   │ │
+│  │      ├── Avoidance FSM (incremental):   │ │
+│  │      │   BRAKE → PICK_SIDE → TURN_30 →  │ │
+│  │      │   CHECK_FRONT → DRIVE_PAST       │ │
+│  │      ├── Sweep mode:                    │ │
+│  │      │   FRONT_LOCK while driving;      │ │
+│  │      │   NORMAL while turning           │ │
+│  │      └── Priority: Safety > Nav         │ │
 │  │                                         │ │
 │  │  5b. MANUAL MODE:                       │ │
-│  │      └── Emergency brake only (<15cm)   │ │
-│  │          └── Blocks forward, allows     │ │
-│  │              back/left/right/stop       │ │
+│  │      └── E-brake on forward (<25cm)     │ │
+│  │          ├── Blocks forward only        │ │
+│  │          └── back/left/right/stop pass  │ │
 │  │                                         │ │
 │  │  6. Update telemetry snapshot           │ │
 │  │     └── All sensor + state data         │ │
 │  │     └── Protected by semaphore          │ │
-│  └─────────────────────────────────────────┘ │
-│                                              │
-│  ┌─── Every 500ms ────────────────────────┐ │
-│  │  7. Recalculate A* path                 │ │
-│  │     └── 40×40 grid, 8-directional       │ │
-│  │     └── Obstacle inflation              │ │
 │  └─────────────────────────────────────────┘ │
 └─────────────────────────────────────────────┘
 ```
@@ -310,8 +307,8 @@ Distances come from continuous sweep (always fresh).
          │          │ dist F/L/R   │      │
          │          │ heading      │      │
          │          │ position     │      │
+         │          │ navigator FSM│      │
          │          │ avoidance    │      │
-         │          │ pathfinding  │      │
          │          │ motors       │      │
          │          │ telemetry    │──────┘
          │          └──────────────┘  semaphore
@@ -334,7 +331,7 @@ Distances come from continuous sweep (always fresh).
 | IMU heading update | 50ms | <1ms | 1 |
 | Encoder update | 50ms | <1ms | 1 |
 | Avoidance decision | 50ms | <1ms | 1 |
-| A* pathfinding | 500ms | 1-10ms | 1 |
+| Bearing recompute | 50ms | <1ms | 1 |
 | Dashboard poll | 500ms | 5-20ms | Server |
 | Full sweep cycle | ~800ms | 8 steps | 0 |
 
@@ -358,8 +355,8 @@ src/
 ├── sensors.h         ← IMU heading, ultrasonic read, sweep data struct
 ├── motors.h          ← TB6612FNG PWM control, direction, brake
 ├── encoder.h         ← Dual wheel odometry, position tracking
-├── avoidance.h       ← Non-blocking obstacle avoidance state machine
-├── pathfinder.h      ← A* 8-directional, obstacle inflation, breadcrumbs
+├── navigator.h       ← Navigator FSM + incremental-turn avoidance
+├── pathfinder.h      ← World-coord target + 20x20 grid + breadcrumbs
 ├── debug.h           ← Ring buffer log, thread-safe
 ├── secrets.h         ← WiFi credentials, server address (gitignored)
 └── robot_main.cpp    ← Setup, Core 1 loop, Core 0 task, sync, tests

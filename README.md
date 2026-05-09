@@ -1,13 +1,14 @@
 # ESP32-S3 4WD Robot Chassis
 
-Autonomous 4WD robot with obstacle avoidance, A* pathfinding, and web dashboard control. Dual-core ESP32-S3 runs sensors and WiFi independently.
+Autonomous 4WD robot with reactive obstacle avoidance, encoder + gyro odometry, and web dashboard control. Dual-core ESP32-S3 runs sensing and WiFi independently of the navigator.
 
 ## Features
 
-- **Obstacle avoidance** — Continuous 8-position ultrasonic sweep (20°–160°), non-blocking state machine
-- **A* pathfinding** — 8-directional, obstacle inflation, path smoothing, sliding 40x40 grid (unlimited range)
-- **Backtracking** — 100 breadcrumbs (20m range) to retrace path home
-- **Dual-core** — Core 0 owns servo sweep + WiFi sync, Core 1 runs brain (avoidance + navigation + motors)
+- **Obstacle avoidance** — 5-angle ultrasonic sweep (20°/55°/90°/125°/160°) with directed-mode sub-patterns. Incremental-turn FSM: brake → pick side → turn 30° → check → drive past → re-bear toward target. Non-blocking, sensor-checked every tick.
+- **Reactive bearing-first navigation** — Goes straight at the target, dodges around obstacles, then re-bears. Sweep mode locks to forward (`SWEEP_FRONT_LOCK`) while driving so the brake decision runs on fresh data, not stale.
+- **Backtracking** — 100 breadcrumbs (20 m range) to retrace path home
+- **Sliding 20×20 grid** — visualised on the dashboard as a live obstacle map (5 cm/cell); not used for path planning
+- **Dual-core** — Core 0 fires ultrasonic + handles WiFi sync, Core 1 owns brain (avoidance + navigator + motors + servo)
 - **Web dashboard** — Live sensor data, manual controls, destination input, grid map, hardware tests
 - **Built-in charging** — 2S BMS + USB-C charger, never remove batteries
 - **AI natural language control** — Ollama LLM translates "go forward 2m" to robot commands (offline, free)
@@ -23,7 +24,7 @@ Autonomous 4WD robot with obstacle avoidance, A* pathfinding, and web dashboard 
 | ESP32-S3 DevKitC-1 | Dual-core 240MHz, WiFi+BLE, 34 GPIO |
 | TB6612FNG | Motor driver, 1.2A/ch, separate PWM+direction |
 | 4WD Smart Car Chassis | Frame + 4 TT motors + wheels |
-| HC-SR04 + SG90 Servo | Ultrasonic distance + 8-position continuous sweep |
+| HC-SR04 + SG90 Servo | Ultrasonic distance + 5-angle servo sweep (mode-switchable) |
 | MPU6050 | Gyroscope heading (integrated over time) |
 | Speed Encoders (x2) | Left + right wheel odometry |
 | 2S 18650 (7.4V) | Rechargeable Li-ion power |
@@ -115,7 +116,7 @@ cd server
 python app.py
 ```
 
-Open: **http://localhost:5000**
+Open: **http://localhost:25565**
 
 ### 6. Drive
 
@@ -142,10 +143,10 @@ robot_chassis/
 │   ├── encoder.h                   # Wheel tick counting + gyro-based odometry
 │   ├── motors.h                    # TB6612FNG with LEDC PWM
 │   ├── sensors.h                   # Continuous sweep data + MPU6050 gyro heading
-│   ├── avoidance.h                 # Non-blocking obstacle avoidance
-│   ├── pathfinder.h                # A* with 8-dir, inflation, smoothing
+│   ├── navigator.h                 # FSM: turning / driving / avoid (incremental-turn)
+│   ├── pathfinder.h                # World-coord target + 20x20 grid + breadcrumbs
 │   ├── debug.h                     # WiFi debug log buffer
-│   └── robot_main.cpp              # Dual-core main (Core 0 sweep+WiFi, Core 1 brain)
+│   └── robot_main.cpp              # Dual-core main (Core 0 ultrasonic+WiFi, Core 1 brain+servo)
 ├── server/                         # PC dashboard server
 │   ├── app.py                      # Flask REST API + AI command queue
 │   ├── ai_translator.py            # Ollama LLM + rule-based fallback
@@ -174,11 +175,12 @@ robot_chassis/
 Phone Hotspot (2.4GHz WiFi)
   │
   ├── ESP32-S3 Robot
-  │     ├── Core 0: Continuous servo sweep (8 positions, 20°-160°)
-  │     │           + WiFi sync during servo settle time
+  │     ├── Core 0: Ultrasonic firing (Core 1 publishes target angle, Core 0 measures)
+  │     │           + WiFi sync (independent task; never blocks sensors)
   │     │           Single /api/robot/sync endpoint (replaces 3 HTTP calls)
-  │     └── Core 1: Brain — avoidance + navigation + motors (20Hz)
-  │                 Reads sweep data via spinlock-protected shared struct
+  │     └── Core 1: Brain — servo + navigator + avoidance + motors (20Hz)
+  │                 Mode-switches sweep pattern (NORMAL / FRONT_LOCK / BYPASS)
+  │                 to keep distFront fresh while driving forward
   │
   └── PC (Flask server + Ollama AI)
         ├── Single /api/dashboard endpoint (replaces 3 browser polls)
@@ -188,7 +190,7 @@ Phone Hotspot (2.4GHz WiFi)
         ├── Shared chat log (all users see all commands)
         └── Cloudflare tunnel (auto-starts if cloudflared installed)
 
-Priority: Safety (avoidance) > Navigation (pathfinding) > AI/Manual control
+Priority: Safety (e-brake) > Manual command > Auto avoidance > Navigation
 ```
 
 ## Power System

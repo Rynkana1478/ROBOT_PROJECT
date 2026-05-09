@@ -4,7 +4,7 @@
 
 A self-driving robot car that:
 - **Avoids obstacles** using an ultrasonic sensor
-- **Finds its way** to a destination you set (A* pathfinding)
+- **Finds its way** to a destination you set (reactive bearing-first navigation)
 - **Reports everything** to a dashboard on your computer
 - **Drives itself** back home via breadcrumb backtracking
 - Can be **manually controlled** from your browser or keyboard
@@ -22,7 +22,7 @@ You control it from a web dashboard running on your PC. Both the robot and your 
     │         │
 [Your PC]  [ESP32-S3 Robot]
     │         │
-    │ Flask   │ Core 1: Sensors + motors + pathfinding (20Hz)
+    │ Flask   │ Core 1: Sensors + motors + reactive navigation (20Hz)
     │ server  │ Core 0: WiFi telemetry + commands (5Hz)
     │         │
     │ Robot POSTs sensor data → server stores it
@@ -239,33 +239,23 @@ Front clear (>50cm)
 
 The front distance is checked **every loop cycle** (not just during avoidance). Even in manual mode, the safety system brakes if an obstacle is too close.
 
-### `pathfinder.h` — A* Pathfinding
+### `pathfinder.h` — Target + Grid + Breadcrumbs
 
-The v2 pathfinder on ESP32-S3 has major improvements:
+The class is named "Pathfinder" historically, but in the current build it's a data structure, not a planner. Navigation is **reactive bearing-first** (`navigator.h`): the robot computes a straight-line bearing to the target and drives. When something blocks the path, the avoidance FSM dodges, then re-computes bearing from the new position.
 
-**8-directional movement** — Can move diagonally (NE, NW, SE, SW), not just N/S/E/W. This produces smoother, more natural paths.
+**Target in world coordinates** — `targetWorldX` / `targetWorldY` are the goal point. `distToTarget(posX, posY)` returns straight-line distance; the navigator stops when that drops below `NAV_REACHED_CM`.
 
-**Octile distance heuristic** — The correct heuristic for 8-direction grids. Calculates minimum cost considering both cardinal and diagonal moves.
+**Sliding 20×20 grid (5 cm/cell)** — visualised on the dashboard as a live obstacle map. When the robot approaches the edge of the visible window, the grid shifts so the robot stays roughly centered. **Not consulted by navigation** — the grid is for the human looking at the dashboard, not the robot's decisions.
 
-**Obstacle inflation** — Cells next to obstacles get a cost penalty. This keeps the robot away from walls instead of scraping past them.
+**100 breadcrumbs** — waypoints dropped every 20 cm (covers ~20 m of travel). Backtracking pops them in reverse order, setting each as the next target.
 
-**Corner-cut prevention** — Diagonal movement is blocked if either adjacent cardinal cell is an obstacle. Prevents the robot from clipping corners.
-
-**Path smoothing** — After A* finds the path, removes unnecessary waypoints on straight lines. Uses line-of-sight checks (Bresenham's algorithm) to verify no obstacles between points.
-
-**Sliding 40x40 grid** — 4m x 4m visible area (vs 2m x 2m on v1). When the robot approaches the edge (within 6 cells), the entire grid shifts:
-- Known obstacle/free data preserved
-- New cells marked "unknown" (higher traversal cost)
-- Target position recalculated
-- **Unlimited travel range** with only 1.6KB of grid memory
-
-**100 breadcrumbs** — Waypoints dropped every 20cm (covers 20m of travel). Backtracking follows them in reverse, using A* to navigate between each crumb.
+**Why no A*** — the 5-angle ultrasonic sweep doesn't give the grid enough fidelity to plan against, and reactive avoidance with the right exit criteria gets the chassis past most obstacles. A planner could be added on top of the same grid if the sensor suite improves.
 
 ### `robot_main.cpp` — The Brain
 
 **Dual-core operation:**
-- **Core 1** (main loop): Sensors, encoders, avoidance, pathfinding — runs at 20Hz (every 50ms)
-- **Core 0** (WiFi task): Telemetry POST, command GET, debug log flush — runs independently at 5Hz
+- **Core 1** (main loop): Sensors, encoders, servo, navigator, avoidance — runs at 20 Hz (every 50 ms)
+- **Core 0** (ultrasonicTask + wifiTask): fires HC-SR04 when Core 1 publishes an angle; separate WiFi task POSTs telemetry/GETs commands
 
 This is the biggest upgrade from v1. WiFi operations (which can block for up to 500ms on bad connections) **never** affect the robot's sensor loop or motor control.
 
@@ -403,7 +393,7 @@ Translates to:
 Server resolves relative using robot heading:
   Robot facing east (90°) → set_target x:+200, y:0
     ↓
-ESP32 receives set_target → A* pathfinding → robot moves
+ESP32 receives set_target → reactive bearing-first navigation → robot moves
 ```
 
 ### Relative vs Absolute Directions
@@ -533,20 +523,17 @@ A lock that prevents two cores from accessing shared data at the same time. When
 ### Dead Reckoning
 Estimating position by measuring movement from a known starting point. Like walking blindfolded: count steps, remember turns. Drifts over time because small errors accumulate. Our system uses dual encoders + gyro to minimize drift.
 
-### A* Algorithm
-A pathfinding algorithm used in games and robotics. Explores a grid of cells, prioritizing cells closest to the goal. Uses a heuristic (estimated remaining distance) to search efficiently. Guarantees finding the shortest path if one exists. Our version uses 8-directional movement with obstacle inflation for smoother, safer paths.
+### Reactive Bearing-First Navigation
+Compute a straight-line bearing from current position to target. Turn until the chassis faces that bearing, then drive forward. If something blocks the path, the avoidance FSM dodges; on exit the bearing is recomputed from the new position and the robot keeps going. No A*, no plan ahead — every decision is based on what the sensors see right now.
 
-### Octile Distance
-The correct distance heuristic for 8-directional grids. Accounts for both straight moves (cost 10) and diagonal moves (cost 14 = sqrt(2) x 10). More accurate than Manhattan distance, which only counts horizontal + vertical.
+### Incremental-Turn Avoidance
+Front cone sees an obstacle → brake → pick the more open side from `distLeft`/`distRight` → turn 30° toward it → check if the new heading is clear → if yes, drive 50 cm forward and exit; if no, turn another 30°, repeat. Hard cap at 120° total before giving up (`NAV_FAILED`). The sweep is locked to forward (`SWEEP_FRONT_LOCK`) while driving so the brake isn't acting on stale data.
 
-### Obstacle Inflation
-Adding a cost penalty to cells adjacent to obstacles. Instead of the robot pathfinding right along a wall (and potentially scraping it), inflation pushes the path a cell or two away from walls. Creates a safety margin.
-
-### Sliding Window Grid
-A fixed-size grid (40x40) that moves with the robot. When the robot approaches the edge, the entire grid shifts — old data scrolls off, new "unknown" cells scroll in. This gives unlimited range with fixed memory (1.6KB).
+### Sliding Window Grid (visualization)
+A 20×20 grid at 5 cm/cell that follows the robot. When the robot approaches the edge, the grid shifts — old data scrolls off, new "unknown" cells scroll in. Used by the dashboard to show a live obstacle map; not consulted by navigation.
 
 ### Breadcrumb Trail
-The robot drops position markers every 20cm as it moves (up to 100 = 20m range). To return home, it follows the markers in reverse, using A* to navigate between each one. Works even if new obstacles appeared after the outbound trip.
+The robot drops position markers every 20 cm as it moves (up to 100 = 20 m range). To return home, it follows the markers in reverse — each crumb becomes the next target, and the navigator drives toward it. Works even if new obstacles appeared after the outbound trip, because avoidance still fires.
 
 ### Complementary Filter
 Blends two sensors: gyro (fast, accurate short-term, drifts long-term) with compass (slow, accurate long-term, noisy short-term). Our project is currently gyro-only, but the code supports adding a compass later with the formula:
