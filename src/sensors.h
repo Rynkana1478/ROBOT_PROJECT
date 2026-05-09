@@ -15,6 +15,20 @@ struct SweepData {
 SweepData    sweepData = {};
 portMUX_TYPE sweepMux  = portMUX_INITIALIZER_UNLOCKED;
 
+// Sweep mode controls Core 1's serviceSweepStateMachine angle cycling.
+// NORMAL      = 5-angle ping-pong. Each angle ~85 ms; idx 2 (front) ~340 ms.
+// BYPASS_LEFT = alternate idx 2 + idx 4 (chassis turned right, wall on left).
+// BYPASS_RIGHT= alternate idx 2 + idx 0 (chassis turned left,  wall on right).
+// FRONT_LOCK  = servo never leaves idx 2. distFront refreshes every ~85 ms
+//               instead of ~340 ms. Used during forward driving so the brake
+//               trigger doesn't act on stale data while the servo wanders to
+//               side angles.
+// In non-NORMAL modes only the listed indices in sweepData.dist[] refresh;
+// other cells retain pre-mode values. Read sweepDist[idx] directly rather
+// than the distLeft/distRight aggregates (which would mix stale cells).
+enum SweepMode { SWEEP_NORMAL, SWEEP_BYPASS_LEFT, SWEEP_BYPASS_RIGHT, SWEEP_FRONT_LOCK };
+volatile SweepMode currentSweepMode = SWEEP_NORMAL;
+
 class Sensors {
 public:
     float distFront     = 999;

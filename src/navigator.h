@@ -19,10 +19,10 @@ enum NavState {
 
 enum AvoidPhase {
     AV_BRAKE,
-    AV_REVERSE,
     AV_PICK_SIDE,
-    AV_TURN,
-    AV_RECHECK
+    AV_TURN_INCREMENT,  // 4-wheel tank turn 30° per increment toward avoidTargetHeading
+    AV_CHECK_FRONT,     // wait for fresh sensor reading after the turn settles
+    AV_DRIVE_PAST       // drive forward AVOID_DRIVE_PAST_CM, then exit
 };
 
 class Navigator {
@@ -52,6 +52,9 @@ public:
         avoidWindowStart = 0;
         pathLengthCm = 0;
         avoidLastDX = 0; avoidLastDY = 0; avoidLastDHeading = 0;
+        turnIncrementCount = 0;
+        driveStartX = 0; driveStartY = 0;
+        currentSweepMode = SWEEP_NORMAL;
     }
 
     // Called when a new target is set; resets path-tracking baseline.
@@ -96,6 +99,9 @@ public:
 
         switch (state) {
             case NAV_TURNING:
+                // Sweep refreshes side cells while we turn; AV_PICK_SIDE will
+                // need fresh distLeft / distRight if we hit something next.
+                currentSweepMode = SWEEP_NORMAL;
                 if (smoothTurnStep(motors, headingErr, sensors.gyroRate)) {
                     // Reached tolerance or would overshoot → brake, let SCAN settle.
                     state = NAV_SCAN_AHEAD;
@@ -104,15 +110,22 @@ public:
                 break;
 
             case NAV_SCAN_AHEAD:
+                currentSweepMode = SWEEP_NORMAL;
                 if (millis() - scanTimer > 150) {
                     state = NAV_DRIVING;
                 }
                 break;
 
             case NAV_DRIVING: {
-                if (sensors.distFront < OBSTACLE_CLOSE ||
-                    sensors.distNearLeft < OBSTACLE_CLOSE ||
-                    sensors.distNearRight < OBSTACLE_CLOSE) {
+                // Lock servo to front while driving so distFront refreshes
+                // every ~85 ms instead of ~340 ms — prevents the brake from
+                // acting on stale data while the servo is at a side angle.
+                currentSweepMode = SWEEP_FRONT_LOCK;
+                // Front-only trigger: near-left/near-right cells (servo 55°/125°)
+                // see things 35° off-center, which catches walls running parallel
+                // to the chassis even when the forward path is clear. Only the
+                // dead-center reading should drive the avoid → drive transition.
+                if (sensors.distFront < OBSTACLE_CLOSE) {
                     enterAvoid(motors, posX, posY, headingDeg);
                     break;
                 }
@@ -138,8 +151,12 @@ public:
                     break;
                 }
 
+                // Approach speed: cruise when target is far AND nothing close;
+                // otherwise drop to AVOID_BYPASS_SPEED — slower than SPEED_SLOW
+                // so the brake has less momentum to fight in the OBSTACLE_SLOW
+                // -> OBSTACLE_CLOSE corridor.
                 int driveSpeed = (distTarget > 50 && sensors.distFront > OBSTACLE_SLOW)
-                                 ? SPEED_CRUISE : SPEED_SLOW;
+                                 ? SPEED_CRUISE : AVOID_BYPASS_SPEED;
                 motors.setState(Motors::M_FORWARD, driveSpeed);
                 break;
             }
@@ -160,9 +177,7 @@ public:
             return avoidActive;
         }
 
-        if (sensors.distFront < OBSTACLE_CLOSE ||
-            sensors.distNearLeft < OBSTACLE_CLOSE ||
-            sensors.distNearRight < OBSTACLE_CLOSE) {
+        if (sensors.distFront < OBSTACLE_CLOSE) {
             enterAvoid(motors, posX, posY, headingDeg);
             return true;
         }
@@ -190,6 +205,11 @@ private:
     unsigned long avoidWindowStart;
     float avoidTargetHeading;
     int avoidDirection;
+
+    // Incremental-turn state.
+    int   turnIncrementCount = 0;
+    float driveStartX = 0;
+    float driveStartY = 0;
 
     float calcBearing(float fromX, float fromY, float toX, float toY) {
         float dx = toX - fromX;
@@ -286,69 +306,138 @@ private:
         switch (avoidPhase) {
             case AV_BRAKE:
                 motors.brake();
+                // Sweep stays in NORMAL during the brake/pick/turn legs so
+                // distLeft/distRight refresh to fresh data before AV_PICK_SIDE
+                // reads them. 4-wheel tank-turn doesn't need clearance, so we
+                // go straight to PICK_SIDE without ever reversing.
+                currentSweepMode = SWEEP_NORMAL;
                 if (now - phaseTimer > 200) {
-                    avoidPhase = AV_REVERSE;
-                    phaseTimer = now;
-                    motors.setState(Motors::M_BACKWARD, SPEED_SLOW);
-                }
-                break;
-
-            case AV_REVERSE:
-                if (now - phaseTimer > 400) {
-                    motors.brake();
                     avoidPhase = AV_PICK_SIDE;
                     phaseTimer = now;
                 }
                 break;
 
             case AV_PICK_SIDE: {
-                if (sensors.distLeft > sensors.distRight + 10) {
+                // Reject sides that are already blocked. We only sidestep
+                // toward space we can actually drive into.
+                bool leftClear  = sensors.distLeft  >= OBSTACLE_SLOW;
+                bool rightClear = sensors.distRight >= OBSTACLE_SLOW;
+
+                if (!leftClear && !rightClear && stuckWarning) {
+                    // Both walls confirmed close AND we've already retried —
+                    // give up cleanly rather than thrash.
+                    motors.stop();
+                    avoidActive = false;
+                    if (state == NAV_AVOIDING) state = NAV_FAILED;
+                    break;
+                }
+
+                if (leftClear && !rightClear) {
                     avoidDirection = -1;
-                } else if (sensors.distRight > sensors.distLeft + 10) {
+                } else if (rightClear && !leftClear) {
                     avoidDirection = 1;
                 } else {
-                    int gridPref = pf.gridSidePreference(headingDeg * PI / 180.0);
-                    avoidDirection = (gridPref >= 0) ? 1 : -1;
+                    // Both clear (or both blocked first try): rank by sweep
+                    // distance with a 15 cm margin; on near-tie, pick the side
+                    // that points closer to the target bearing.
+                    if (sensors.distLeft  > sensors.distRight + 15) {
+                        avoidDirection = -1;
+                    } else if (sensors.distRight > sensors.distLeft  + 15) {
+                        avoidDirection = 1;
+                    } else {
+                        float targetBearing = calcBearing(posX, posY,
+                                                          pf.targetWorldX, pf.targetWorldY);
+                        float relBearing = angleDiff(targetBearing, headingDeg);
+                        avoidDirection = (relBearing >= 0) ? 1 : -1;
+                    }
                 }
 
                 if (stuckWarning) avoidDirection = -avoidDirection;
 
-                avoidTargetHeading = headingDeg + (avoidDirection * 90);
+                // First increment: 30° toward chosen side.
+                avoidTargetHeading = headingDeg +
+                                     (avoidDirection * AVOID_TURN_INCREMENT_DEG);
                 while (avoidTargetHeading >= 360) avoidTargetHeading -= 360;
                 while (avoidTargetHeading < 0)    avoidTargetHeading += 360;
+                turnIncrementCount = 1;
 
-                avoidPhase = AV_TURN;
+                avoidPhase = AV_TURN_INCREMENT;
                 phaseTimer = now;
                 break;
             }
 
-            case AV_TURN: {
+            case AV_TURN_INCREMENT: {
                 float err = angleDiff(avoidTargetHeading, headingDeg);
                 if (now - phaseTimer > 3000 ||
                     smoothTurnStep(motors, err, sensors.gyroRate)) {
-                    avoidPhase = AV_RECHECK;
+                    avoidPhase = AV_CHECK_FRONT;
                     phaseTimer = now;
                 }
                 break;
             }
 
-            case AV_RECHECK:
-                if (now - phaseTimer > 100) {
-                    bool clear = sensors.distFront > OBSTACLE_SLOW &&
-                                 sensors.distNearLeft > OBSTACLE_CLOSE &&
-                                 sensors.distNearRight > OBSTACLE_CLOSE;
-                    if (clear) {
-                        avoidLastDX = posX - avoidStartX;
-                        avoidLastDY = posY - avoidStartY;
-                        avoidLastDHeading = angleDiff(headingDeg, avoidStartHeading);
-                        avoidActive = false;
-                        if (state == NAV_AVOIDING) state = NAV_TURNING;
-                    } else {
-                        avoidPhase = AV_BRAKE;
-                        phaseTimer = now;
-                    }
+            case AV_CHECK_FRONT: {
+                // Wait for one full sweep cycle so distFront reflects the
+                // post-turn orientation, not a reading taken mid-rotation.
+                if (now - phaseTimer < AVOID_CHECK_SETTLE_MS) {
+                    motors.brake();
+                    break;
                 }
+
+                if (sensors.distFront > OBSTACLE_SLOW) {
+                    // Front is clear at the new heading — commit to driving past.
+                    // Switch sweep to FRONT_LOCK so the chain-back front check
+                    // during AV_DRIVE_PAST runs on fresh data, not stale.
+                    driveStartX = posX;
+                    driveStartY = posY;
+                    currentSweepMode = SWEEP_FRONT_LOCK;
+                    avoidPhase = AV_DRIVE_PAST;
+                    phaseTimer = now;
+                    break;
+                }
+
+                // Still blocked at this heading. Try another increment.
+                if (turnIncrementCount >= AVOID_MAX_INCREMENTS) {
+                    // Cumulative turn has hit the cap (default 120°). Give up.
+                    motors.stop();
+                    avoidActive = false;
+                    if (state == NAV_AVOIDING) state = NAV_FAILED;
+                    break;
+                }
+
+                avoidTargetHeading += avoidDirection * AVOID_TURN_INCREMENT_DEG;
+                while (avoidTargetHeading >= 360) avoidTargetHeading -= 360;
+                while (avoidTargetHeading < 0)    avoidTargetHeading += 360;
+                turnIncrementCount++;
+                avoidPhase = AV_TURN_INCREMENT;
+                phaseTimer = now;
                 break;
+            }
+
+            case AV_DRIVE_PAST: {
+                if (sensors.distFront < OBSTACLE_CLOSE) {
+                    // New obstacle appeared mid-drive. Re-evaluate from scratch.
+                    motors.brake();
+                    currentSweepMode = SWEEP_NORMAL;  // refresh sides for next pick
+                    avoidPhase = AV_BRAKE;
+                    phaseTimer = now;
+                    break;
+                }
+
+                float traveled = distance(driveStartX, driveStartY, posX, posY);
+                if (traveled >= AVOID_DRIVE_PAST_CM) {
+                    avoidLastDX = posX - avoidStartX;
+                    avoidLastDY = posY - avoidStartY;
+                    avoidLastDHeading = angleDiff(headingDeg, avoidStartHeading);
+                    motors.brake();
+                    avoidActive = false;
+                    if (state == NAV_AVOIDING) state = NAV_TURNING;
+                    break;
+                }
+
+                motors.setState(Motors::M_FORWARD, AVOID_BYPASS_SPEED);
+                break;
+            }
         }
     }
 };

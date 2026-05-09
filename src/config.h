@@ -44,9 +44,13 @@
 #define BATTERY_MIN_V 6.0
 
 // --- Obstacle Thresholds (cm) ---
-#define OBSTACLE_CLOSE  15
+// OBSTACLE_CLOSE: brake-trigger distance. Sensor lag (~340 ms front refresh in
+// SWEEP_NORMAL) plus brake coast at SPEED_SLOW means we need ~10-15 cm of
+// runway between trigger and contact. Raised 15 -> 20 -> 25 progressively as
+// real-world bumping showed momentum was beating the brake.
+#define OBSTACLE_CLOSE  25
 #define OBSTACLE_SLOW   30
-#define OBSTACLE_CLEAR  50
+#define OBSTACLE_CLEAR  40
 
 // --- Motor Speeds (0-1023, 10-bit) ---
 #define SPEED_STOP    0
@@ -65,7 +69,7 @@
 
 // --- Grid ---
 #define GRID_SIZE     20
-#define CELL_SIZE_CM  10
+#define CELL_SIZE_CM  5
 
 // --- Timing ---
 #define SCAN_INTERVAL_MS    50    // 20Hz sensor loop
@@ -122,12 +126,32 @@ static const int SWEEP_ANGLES[SWEEP_STEPS] = {20, 55, 90, 125, 160};
 // --- Navigator ---
 #define NAV_HEADING_TOLERANCE  3.0   // accept heading within this many deg of bearing
 #define NAV_DRIFT_THRESHOLD    10.0  // re-enter TURN if drift exceeds during DRIVE
-#define NAV_REACHED_CM         15.0
+#define NAV_REACHED_CM         5.0
 #define NAV_OBSTACLE_MARK_CM   80.0
 #define OBSTACLE_DECAY_MS      30000
 #define DECAY_CHECK_MS         5000
 #define AVOID_REPEAT_LIMIT     3
 #define AVOID_REPEAT_WINDOW_MS 5000
+
+// Avoidance — incremental turn + check + drive:
+//  1. Brake when distFront < OBSTACLE_CLOSE
+//  2. Pick a side from distLeft / distRight
+//  3. Turn AVOID_TURN_INCREMENT_DEG (30°) toward open side
+//  4. Wait AVOID_CHECK_SETTLE_MS for a fresh sensor reading
+//  5. If distFront is clear (> OBSTACLE_SLOW), drive forward for
+//     AVOID_DRIVE_PAST_CM, then hand back to navigator (re-bear toward target)
+//  6. If still blocked, increment another 30°. Up to AVOID_MAX_INCREMENTS
+//     (4 × 30 = 120° total) before giving up to NAV_FAILED.
+// AV_DRIVE_PAST uses encoder pose for distance; brakes + re-evaluates if a
+// new obstacle appears (distFront < OBSTACLE_CLOSE) mid-drive.
+#define AVOID_BYPASS_SPEED          400    // PWM during AV_DRIVE_PAST
+#define AVOID_TURN_INCREMENT_DEG    30.0   // each turn step
+#define AVOID_MAX_INCREMENTS        4      // hard cap on cumulative turn
+#define AVOID_DRIVE_PAST_CM         50.0   // forward travel after front clears
+                                           // 50 cm at 30° turn = 25 cm lateral
+                                           // offset, enough to clear obstacles
+                                           // wider than chassis half-width.
+#define AVOID_CHECK_SETTLE_MS       400    // wait for fresh sweep before recheck
 
 // Smooth-turn profile: proportional speed ramps from MIN at tolerance edge
 // up to SPEED_TURN at FULL_DEG. STOP_TIME_MS models brake deceleration so

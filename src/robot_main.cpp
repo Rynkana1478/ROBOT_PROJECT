@@ -258,10 +258,26 @@ void loop() {
 
     // ---- Drive: manual is hard override; auto drains queue ----
     if (currentMode == MODE_MANUAL) {
-        bool avoiding = navigator.updateManualAvoid(sensors, motors, pathfinder,
-                                                    encoder.posX, encoder.posY,
-                                                    sensors.heading);
-        if (!avoiding) executeManualState();
+        // Forward command goes through three zones:
+        //   distFront >  OBSTACLE_SLOW  -> full SPEED_CRUISE (executeManualState)
+        //   OBSTACLE_CLOSE..OBSTACLE_SLOW -> AVOID_BYPASS_SPEED (less momentum)
+        //   distFront <  OBSTACLE_CLOSE -> brake (e-brake)
+        // Idle / reverse / turn / stop pass straight through.
+        // Servo locks to forward whenever we're commanding forward, so the
+        // e-brake decision doesn't act on stale data while the servo wanders.
+        bool wantsForward = (strcmp(manualState, "forward") == 0);
+        currentSweepMode = wantsForward ? SWEEP_FRONT_LOCK : SWEEP_NORMAL;
+        if (wantsForward) {
+            if (sensors.distFront < OBSTACLE_CLOSE) {
+                motors.brake();
+            } else if (sensors.distFront < OBSTACLE_SLOW) {
+                motors.setState(Motors::M_FORWARD, AVOID_BYPASS_SPEED);
+            } else {
+                executeManualState();
+            }
+        } else {
+            executeManualState();
+        }
     } else {
         // Auto mode: drain queue; navigator drives toward current target.
         if (!pathfinder.hasTarget && !cmdQueue.isEmpty()) {
@@ -360,6 +376,23 @@ snapshot:
 // expired, which kept resetting servoSettleUntil and starved phase B. Core 1
 // now owns publishing; Core 0's ultrasonicTask only reads idx and measures.
 // ============================================
+// Returns the next sweepStep for the active sweep mode.
+//   NORMAL       -> ping-pong 0..SWEEP_STEPS-1
+//   BYPASS_LEFT  -> alternate idx 2 (front 90°)  ↔ idx 4 (left  160°)
+//   BYPASS_RIGHT -> alternate idx 2 (front 90°)  ↔ idx 0 (right 20°)
+//   FRONT_LOCK   -> always idx 2 (servo never leaves 90°)
+// In non-NORMAL modes, sweepDir is unused but left untouched so a return to
+// NORMAL just resumes ping-pong direction from wherever we are.
+static int advanceSweepStep(SweepMode mode, int curStep, int* dir) {
+    if (mode == SWEEP_FRONT_LOCK)   return 2;
+    if (mode == SWEEP_BYPASS_LEFT)  return (curStep == 2) ? 4 : 2;
+    if (mode == SWEEP_BYPASS_RIGHT) return (curStep == 2) ? 0 : 2;
+    int next = curStep + *dir;
+    if (next >= SWEEP_STEPS) { *dir = -1; return SWEEP_STEPS - 2; }
+    if (next < 0)            { *dir =  1; return 1; }
+    return next;
+}
+
 void serviceSweepStateMachine() {
     if (!servoReady) return;
     unsigned long now = millis();
@@ -381,9 +414,7 @@ void serviceSweepStateMachine() {
     if (currentAngleIdx >= 0 && measuredAngleIdx == currentAngleIdx) {
         currentAngleIdx = -1;
         servoSettleUntil = 0;
-        sweepStep += sweepDir;
-        if (sweepStep >= SWEEP_STEPS) { sweepStep = SWEEP_STEPS - 2; sweepDir = -1; }
-        else if (sweepStep < 0)        { sweepStep = 1;              sweepDir =  1; }
+        sweepStep = advanceSweepStep(currentSweepMode, sweepStep, &sweepDir);
     }
 }
 

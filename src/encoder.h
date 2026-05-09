@@ -118,7 +118,11 @@ public:
         float distAvg = (distL + distR) / 2.0;
         if (motorState == Motors::M_BACKWARD) distAvg = -distAvg;
 
-        distAvg *= traction;
+        // Slip flag is still raised by updateSlip() above and surfaces in
+        // telemetry, but we no longer scale distance by `traction`. The slip
+        // rule (encoder ticking + accelY < threshold) fires at constant
+        // velocity — accel is zero at cruise — which used to drop traction
+        // mid-trip and make 200 cm commands overshoot to 300-400 cm.
 
         totalDistCm += abs(distAvg);
         posX += distAvg * sin(headingRad);

@@ -1,5 +1,5 @@
 // ============================================
-// Test 03: HC-SR04 Ultrasonic + SG90 Servo
+// Test 03: HC-SR04 Ultrasonic + SG90 Servo x
 // Wire: TRIG=GPIO18, ECHO=GPIO8
 //        Servo=GPIO9, VCC=5V, GND
 // Tests: distance reading, servo sweep, full scan
@@ -8,8 +8,8 @@
 #include <Arduino.h>
 #include <ESP32Servo.h>
 
-#define US_TRIG   18
-#define US_ECHO   8
+#define US_TRIG       18
+#define US_ECHO       3
 #define SERVO_PIN 9
 
 Servo servo;
