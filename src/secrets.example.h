@@ -8,8 +8,8 @@
 #define WIFI_PASSWORD "YourPassword"
 
 // Where the Flask server lives
-//   Local LAN:        "192.168.x.x"   port 25565  HTTPS=false
-//   DDNS:             "yourdomain.thddns.net" port 5570  HTTPS=false
+//   Local LAN:        "192.168.x.x"      port 25565   HTTPS=false
+//   DDNS:             "your-ddns.example" port <yours> HTTPS=false
 //   Cloudflared:      "*.trycloudflare.com"  port 443  HTTPS=true
 //   Render/Railway:   "*.onrender.com"  port 443  HTTPS=true
 #define SERVER_HOST   "192.168.1.100"

@@ -460,8 +460,10 @@ def _public_ip(timeout=1.5):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 25565))
-    ddns = os.environ.get("DDNS_HOST", "blackwise.thddns.net")
-    ddns_port = os.environ.get("DDNS_PORT", "5570")
+    # DDNS shown in startup banner only — set DDNS_HOST / DDNS_PORT env vars
+    # (e.g. via your local start.bat / restart.bat) to display them.
+    ddns = os.environ.get("DDNS_HOST", "")
+    ddns_port = os.environ.get("DDNS_PORT", "")
 
     print("=" * 60)
     print("  4WD Robot Server")
@@ -470,7 +472,8 @@ if __name__ == "__main__":
     print(f"  Local:      http://localhost:{port}")
     for ip in _lan_ips():
         print(f"  LAN:        http://{ip}:{port}")
-    print(f"  DDNS:       http://{ddns}:{ddns_port}")
+    if ddns and ddns_port:
+        print(f"  DDNS:       http://{ddns}:{ddns_port}")
     pub = _public_ip()
     if pub:
         print(f"  Public IP:  {pub}")
