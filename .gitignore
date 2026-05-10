@@ -22,6 +22,9 @@ server/logs/
 server/start.bat
 server/restart.bat
 
+# Server config holds personal DDNS host — copy from .example
+server/config_local.py
+
 # Notes (personal)
 Note/
 

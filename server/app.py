@@ -16,6 +16,18 @@ from ai_translator import translate as ai_translate, check_ollama
 
 app = Flask(__name__)
 
+# --- Local config ----------------------------------------------------
+# Tries to import server/config_local.py (gitignored, holds personal
+# DDNS host etc.). Falls back to env vars so cloud deployments
+# (Render / Railway) that inject PORT via environment still work.
+try:
+    from config_local import PORT, DDNS_HOST, DDNS_PORT
+except ImportError:
+    PORT       = int(os.environ.get("PORT", 25565))
+    DDNS_HOST  = os.environ.get("DDNS_HOST", "")
+    DDNS_PORT  = os.environ.get("DDNS_PORT", "")
+# ---------------------------------------------------------------------
+
 # --- Chassis tracking ---
 chassis_info = {"id": None, "last_seen": 0}
 
@@ -103,9 +115,8 @@ def _enqueue(cmd_dict):
 # ============================================
 @app.route("/")
 def dashboard():
-    port = int(os.environ.get("PORT", 25565))
     return render_template("dashboard.html", grid_size=GRID_SIZE,
-                           lan_ips=_lan_ips(), server_port=port)
+                           lan_ips=_lan_ips(), server_port=PORT)
 
 
 # ============================================
@@ -459,25 +470,19 @@ def _public_ip(timeout=1.5):
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 25565))
-    # DDNS shown in startup banner only — set DDNS_HOST / DDNS_PORT env vars
-    # (e.g. via your local start.bat / restart.bat) to display them.
-    ddns = os.environ.get("DDNS_HOST", "")
-    ddns_port = os.environ.get("DDNS_PORT", "")
-
     print("=" * 60)
     print("  4WD Robot Server")
     cid = chassis_info.get("id")
     print(f"  Chassis:    {cid if cid else '<waiting for first sync>'}")
-    print(f"  Local:      http://localhost:{port}")
+    print(f"  Local:      http://localhost:{PORT}")
     for ip in _lan_ips():
-        print(f"  LAN:        http://{ip}:{port}")
-    if ddns and ddns_port:
-        print(f"  DDNS:       http://{ddns}:{ddns_port}")
+        print(f"  LAN:        http://{ip}:{PORT}")
+    if DDNS_HOST and DDNS_PORT:
+        print(f"  DDNS:       http://{DDNS_HOST}:{DDNS_PORT}")
     pub = _public_ip()
     if pub:
         print(f"  Public IP:  {pub}")
     print("=" * 60)
 
-    app.run(host="0.0.0.0", port=port,
+    app.run(host="0.0.0.0", port=PORT,
             debug=os.environ.get("FLASK_DEBUG") == "1", threaded=True)
