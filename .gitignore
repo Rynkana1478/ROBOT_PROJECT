@@ -18,6 +18,10 @@ server/.cloudflared.log
 server/.tunnel_info
 server/logs/
 
+# Server start scripts hold personal DDNS host — copy from .example
+server/start.bat
+server/restart.bat
+
 # Notes (personal)
 Note/
 

@@ -1,11 +1,13 @@
 @echo off
+REM Copy this file to restart.bat and edit the values below for your setup.
+REM restart.bat is gitignored to keep your DDNS host private.
 echo Killing old server...
 taskkill /F /IM python.exe 2>nul
 timeout /t 2 /noq >nul
 echo Starting server on port 25565...
 cd /d "%~dp0"
 set PORT=25565
-set DDNS_HOST=blackwise.thddns.net
-set DDNS_PORT=5570
+set DDNS_HOST=your-ddns-host.example.com
+set DDNS_PORT=0
 start "RobotServer" python app.py
 echo Server restarted.

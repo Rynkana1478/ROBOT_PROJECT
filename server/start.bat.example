@@ -1,4 +1,6 @@
 @echo off
+REM Copy this file to start.bat and edit the values below for your setup.
+REM start.bat is gitignored to keep your DDNS host private.
 echo.
 cd /d "%~dp0"
 
@@ -9,7 +11,7 @@ if errorlevel 1 (
 )
 
 set PORT=25565
-set DDNS_HOST=blackwise.thddns.net
-set DDNS_PORT=5570
+set DDNS_HOST=your-ddns-host.example.com
+set DDNS_PORT=0
 python app.py
 pause
