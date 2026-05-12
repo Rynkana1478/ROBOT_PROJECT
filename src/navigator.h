@@ -13,6 +13,7 @@ enum NavState {
     NAV_SCAN_AHEAD,
     NAV_DRIVING,
     NAV_AVOIDING,
+    NAV_TURN_ONLY,    // pure rotation: turn to targetHeading and stop, no driving
     NAV_REACHED,
     NAV_FAILED
 };
@@ -31,6 +32,8 @@ public:
     bool avoidActive = false;
     int  avoidCount = 0;
     bool stuckWarning = false;
+    bool avoidGaveUp = false; // manual-mode cooldown: stay braked after a failed avoid
+    float targetHeading = 0;  // for NAV_TURN_ONLY (degrees, normalized 0..360)
 
     // Avoidance displacement telemetry (start pose -> end pose)
     float avoidStartX = 0, avoidStartY = 0, avoidStartHeading = 0;
@@ -46,6 +49,7 @@ public:
         avoidActive = false;
         avoidCount = 0;
         stuckWarning = false;
+        avoidGaveUp = false;
         avoidPhase = AV_BRAKE;
         phaseTimer = 0;
         scanTimer = 0;
@@ -69,6 +73,20 @@ public:
         stuckWarning = false;
     }
 
+    // Pure rotation: turn deltaDeg from current heading and stop.
+    // Caller (executeQueuedCmd) is responsible for setting pf.turnOnly so the
+    // pathfinder skips its distance-based reached check while we rotate.
+    void setTurnTarget(Motors &motors, float curHeadingDeg, float deltaDeg) {
+        motors.brake();
+        state = NAV_TURN_ONLY;
+        targetHeading = curHeadingDeg + deltaDeg;
+        while (targetHeading >= 360) targetHeading -= 360;
+        while (targetHeading <    0) targetHeading += 360;
+        targetStartMs = millis();
+        avoidCount = 0;
+        stuckWarning = false;
+    }
+
     // Add to running path-length odometer. Brain calls this each tick.
     void accumulatePath(float distAvgCm) {
         pathLengthCm += fabs(distAvgCm);
@@ -77,6 +95,21 @@ public:
     void update(Sensors &sensors, Motors &motors, Pathfinder &pf,
                 float posX, float posY, float headingDeg) {
         if (state == NAV_IDLE || state == NAV_REACHED || state == NAV_FAILED) return;
+
+        // NAV_TURN_ONLY runs ahead of the pathfinder-based logic — it has no
+        // X,Y target, just a heading goal. When done, mark pf.targetReached so
+        // the brain loop's existing completion path fires.
+        if (state == NAV_TURN_ONLY) {
+            currentSweepMode = SWEEP_NORMAL;
+            float err = angleDiff(targetHeading, headingDeg);
+            if (smoothTurnStep(motors, err, sensors.gyroRate)) {
+                state = NAV_REACHED;
+                motors.stop();
+                pf.targetReached = true;
+                pf.turnOnly = false;
+            }
+            return;
+        }
 
         float bearingDeg = calcBearing(posX, posY, pf.targetWorldX, pf.targetWorldY);
         float headingErr = angleDiff(bearingDeg, headingDeg);
@@ -125,7 +158,11 @@ public:
                 // see things 35° off-center, which catches walls running parallel
                 // to the chassis even when the forward path is clear. Only the
                 // dead-center reading should drive the avoid → drive transition.
-                if (sensors.distFront < OBSTACLE_CLOSE) {
+                // Enter avoid at OBSTACLE_SLOW (was OBSTACLE_CLOSE): cruise
+                // momentum plus sensor lag can skip the 5cm gap between SLOW
+                // and CLOSE in a single tick, hitting brake at full speed.
+                // Triggering at SLOW gives the brake the full 30cm runway.
+                if (sensors.distFront < OBSTACLE_SLOW) {
                     enterAvoid(motors, posX, posY, headingDeg);
                     break;
                 }
@@ -151,12 +188,20 @@ public:
                     break;
                 }
 
-                // Approach speed: cruise when target is far AND nothing close;
-                // otherwise drop to AVOID_BYPASS_SPEED — slower than SPEED_SLOW
-                // so the brake has less momentum to fight in the OBSTACLE_SLOW
-                // -> OBSTACLE_CLOSE corridor.
-                int driveSpeed = (distTarget > 50 && sensors.distFront > OBSTACLE_SLOW)
-                                 ? SPEED_CRUISE : AVOID_BYPASS_SPEED;
+                // Approach speed: three-tier so the brake never fights cruise
+                // momentum.
+                //   distFront > OBSTACLE_SLOWDOWN && distTarget > 50 -> CRUISE
+                //   OBSTACLE_SLOW < distFront <= OBSTACLE_SLOWDOWN  -> SLOW
+                //   distFront <= OBSTACLE_SLOW                       -> avoid trigger above
+                // distTarget gate ensures we slow down approaching the goal too.
+                int driveSpeed;
+                if (distTarget > 50 && sensors.distFront > OBSTACLE_SLOWDOWN) {
+                    driveSpeed = SPEED_CRUISE;
+                } else if (sensors.distFront > OBSTACLE_SLOW) {
+                    driveSpeed = SPEED_SLOW;
+                } else {
+                    driveSpeed = AVOID_BYPASS_SPEED;   // unreachable: avoid already triggered
+                }
                 motors.setState(Motors::M_FORWARD, driveSpeed);
                 break;
             }
@@ -170,19 +215,52 @@ public:
         }
     }
 
+    // Manual-mode avoid: called every brain tick while user holds forward.
+    // Returns true if avoid (or its post-failure cooldown) is currently
+    // driving the motors — caller must NOT issue executeManualState() in
+    // that case. Returns false when the path is clear and normal manual
+    // forward should run.
     bool updateManualAvoid(Sensors &sensors, Motors &motors, Pathfinder &pf,
                            float posX, float posY, float headingDeg) {
+        // In-progress avoid drives motors; the FSM owns sweep mode too.
         if (avoidActive) {
             runAvoid(sensors, motors, pf, posX, posY, headingDeg);
-            return avoidActive;
+            return true;
         }
 
-        if (sensors.distFront < OBSTACLE_CLOSE) {
+        // After a give-up: stay braked until the path opens past OBSTACLE_CLEAR.
+        // Prevents retrying the same blocked-on-all-sides geometry every tick.
+        if (avoidGaveUp) {
+            if (sensors.distFront >= OBSTACLE_CLEAR) {
+                avoidGaveUp = false;
+            } else {
+                motors.brake();
+                return true;
+            }
+        }
+
+        // Trigger at OBSTACLE_SLOW (was OBSTACLE_CLOSE) — same reason as the
+        // auto-mode trigger: cruise momentum plus sensor lag can skip the
+        // 5cm gap to OBSTACLE_CLOSE in a single tick.
+        if (sensors.distFront < OBSTACLE_SLOW) {
             enterAvoid(motors, posX, posY, headingDeg);
             return true;
         }
 
         return false;
+    }
+
+    // Called from the brain loop when the user lets go of forward (or hits
+    // stop / a different direction) mid-avoid. Stops the FSM cleanly so the
+    // user's command takes effect immediately on the next tick.
+    void cancelManualAvoid(Motors &motors) {
+        if (avoidActive) {
+            avoidActive = false;
+            avoidPhase = AV_BRAKE;
+            motors.brake();
+        }
+        avoidGaveUp = false;
+        currentSweepMode = SWEEP_NORMAL;
     }
 
     const char* stateStr() {
@@ -192,6 +270,7 @@ public:
             case NAV_SCAN_AHEAD: return "SCAN";
             case NAV_DRIVING:    return "DRIVING";
             case NAV_AVOIDING:   return "AVOIDING";
+            case NAV_TURN_ONLY:  return "TURN";
             case NAV_REACHED:    return "REACHED";
             case NAV_FAILED:     return "FAILED";
             default:             return "?";
@@ -325,9 +404,12 @@ private:
 
                 if (!leftClear && !rightClear && stuckWarning) {
                     // Both walls confirmed close AND we've already retried —
-                    // give up cleanly rather than thrash.
+                    // give up cleanly rather than thrash. avoidGaveUp signals
+                    // manual mode to sit braked until the path opens up,
+                    // instead of immediately retriggering avoid each tick.
                     motors.stop();
                     avoidActive = false;
+                    avoidGaveUp = true;
                     if (state == NAV_AVOIDING) state = NAV_FAILED;
                     break;
                 }
@@ -386,11 +468,18 @@ private:
 
                 if (sensors.distFront > OBSTACLE_SLOW) {
                     // Front is clear at the new heading — commit to driving past.
-                    // Switch sweep to FRONT_LOCK so the chain-back front check
-                    // during AV_DRIVE_PAST runs on fresh data, not stale.
+                    // Switch sweep to BYPASS_* watching the side we turned AWAY
+                    // from. avoidDirection > 0 means we turned right (CW), so
+                    // the trailing wall is on our LEFT → SWEEP_BYPASS_LEFT
+                    // alternates idx 2 (front) with idx 3 (near-left 125°).
+                    // Symmetric for the other side. distFront still refreshes
+                    // every other sweep cycle (~170ms), good enough for the
+                    // ~12 cm/s bypass speed.
                     driveStartX = posX;
                     driveStartY = posY;
-                    currentSweepMode = SWEEP_FRONT_LOCK;
+                    currentSweepMode = (avoidDirection > 0)
+                                       ? SWEEP_BYPASS_LEFT
+                                       : SWEEP_BYPASS_RIGHT;
                     avoidPhase = AV_DRIVE_PAST;
                     phaseTimer = now;
                     break;
@@ -401,6 +490,7 @@ private:
                     // Cumulative turn has hit the cap (default 120°). Give up.
                     motors.stop();
                     avoidActive = false;
+                    avoidGaveUp = true;
                     if (state == NAV_AVOIDING) state = NAV_FAILED;
                     break;
                 }
@@ -415,10 +505,28 @@ private:
             }
 
             case AV_DRIVE_PAST: {
-                if (sensors.distFront < OBSTACLE_CLOSE) {
-                    // New obstacle appeared mid-drive. Re-evaluate from scratch.
+                // Front-clip: brake at OBSTACLE_SLOW (raised from CLOSE).
+                // At AVOID_BYPASS_SPEED the chassis covers ~3 cm per sensor
+                // refresh, so dropping the trigger to SLOW (30 cm) gives the
+                // brake one full refresh cycle of runway.
+                if (sensors.distFront < OBSTACLE_SLOW) {
                     motors.brake();
                     currentSweepMode = SWEEP_NORMAL;  // refresh sides for next pick
+                    avoidPhase = AV_BRAKE;
+                    phaseTimer = now;
+                    break;
+                }
+
+                // Side-clip: we turned avoidDirection*30° AWAY from the wall,
+                // so the trailing wall is on the opposite side of the chassis.
+                // The near-side sensor (~35° off front) covers the front-side
+                // corner that would clip first. Brake + re-pick if too close.
+                float sideDist = (avoidDirection > 0)
+                                 ? sensors.distNearLeft
+                                 : sensors.distNearRight;
+                if (sideDist < AVOID_SIDE_CLEAR_CM) {
+                    motors.brake();
+                    currentSweepMode = SWEEP_NORMAL;
                     avoidPhase = AV_BRAKE;
                     phaseTimer = now;
                     break;

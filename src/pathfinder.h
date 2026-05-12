@@ -24,6 +24,7 @@ public:
     float targetWorldY = 0;
     bool  hasTarget = false;
     bool  targetReached = false;
+    bool  turnOnly = false;     // pure-rotation mode: skip distance-based reached check
     bool  gridDirty = false;
 
     float crumbX[MAX_CRUMBS];
@@ -54,6 +55,7 @@ public:
         targetWorldY = wy;
         hasTarget = true;
         targetReached = false;
+        turnOnly = false;        // any positional target uses distance-based reach
         updateTargetGrid();
     }
 
@@ -83,7 +85,7 @@ public:
             dropCrumb(worldX, worldY);
         }
 
-        if (hasTarget && !targetReached &&
+        if (hasTarget && !targetReached && !turnOnly &&
             dist2D(worldX, worldY, targetWorldX, targetWorldY) < NAV_REACHED_CM) {
             targetReached = true;
         }

@@ -12,6 +12,7 @@ enum CmdType {
     CMD_NONE,
     CMD_SET_TARGET,
     CMD_MOVE_RELATIVE,
+    CMD_TURN_RELATIVE,   // pure rotation: turn N degrees from current heading
     CMD_BACKTRACK,
     CMD_RESET,
     CMD_CLEAR_MAP,
@@ -23,7 +24,7 @@ struct QueuedCmd {
     uint32_t id;
     CmdType  type;
     float    x, y;       // for set_target / move_relative
-    float    heading;    // for set_heading
+    float    heading;    // for set_heading and turn_relative (delta degrees)
 };
 
 class CommandQueue {

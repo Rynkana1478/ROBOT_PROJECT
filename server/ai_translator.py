@@ -31,15 +31,19 @@ Diagonal directions (multiply distance by 0.707 for BOTH x and y):
 
 ONLY these actions exist. DO NOT invent new ones:
 - "set_target" with "x" and "y" in cm - ABSOLUTE world coordinates (for north/south/east/west)
-- "move_relative" with "forward" and "right" in cm - RELATIVE to robot's facing direction (for forward/backward/left/right)
+- "move_relative" with "forward" and "right" in cm - RELATIVE translation (for forward/backward/strafe-left/strafe-right)
+- "turn_relative" with "degrees" - PURE ROTATION in place. Negative = turn left (CCW), positive = turn right (CW). 90 = quarter turn, 180 = spin around.
 - "backtrack" (no params - return to start)
 - "stop" (no params)
 - "reset" (no params)
 
-CRITICAL DISTINCTION:
+CRITICAL DISTINCTIONS:
 - "go north/south/east/west" = ABSOLUTE direction = use "set_target" with x,y
-- "go forward/backward/left/right" = RELATIVE to where robot faces = use "move_relative" with forward,right
+- "go forward/backward" or "go front/ahead/straight/advance" or "reverse/retreat" = use "move_relative" with forward (positive=forward, negative=back), right=0
+- "go left/right N cm" = strafe = "move_relative" with forward=0, right=±N (this is a sideways MOVE, not a turn)
+- "turn left/right" or "turn N degrees" or "rotate" or "spin around" = "turn_relative" — robot rotates in place WITHOUT moving
 - "forward" means in front of the robot, NOT always north
+- Synonyms: front=ahead=straight=advance=forward; reverse=retreat=backward
 
 Output format: {"commands": [...], "explanation": "short text"}
 
@@ -85,6 +89,27 @@ Output: {"commands": [{"action": "set_target", "x": -212, "y": 212}], "explanati
 
 Input: "go northeast 1m then come back"
 Output: {"commands": [{"action": "set_target", "x": 71, "y": 71}, {"action": "backtrack"}], "explanation": "Northeast 100cm then return"}
+
+Input: "go front 50cm"
+Output: {"commands": [{"action": "move_relative", "forward": 50, "right": 0}], "explanation": "Forward 50cm (relative)"}
+
+Input: "turn left"
+Output: {"commands": [{"action": "turn_relative", "degrees": -90}], "explanation": "Rotate 90 degrees left in place"}
+
+Input: "turn right"
+Output: {"commands": [{"action": "turn_relative", "degrees": 90}], "explanation": "Rotate 90 degrees right in place"}
+
+Input: "turn 45 degrees"
+Output: {"commands": [{"action": "turn_relative", "degrees": 45}], "explanation": "Rotate 45 degrees right (positive = CW)"}
+
+Input: "spin around"
+Output: {"commands": [{"action": "turn_relative", "degrees": 180}], "explanation": "180 degree spin in place"}
+
+Input: "turn left 45"
+Output: {"commands": [{"action": "turn_relative", "degrees": -45}], "explanation": "Rotate 45 degrees left in place"}
+
+Input: "go ahead 1 meter then turn right and go forward 50cm"
+Output: {"commands": [{"action": "move_relative", "forward": 100, "right": 0}, {"action": "turn_relative", "degrees": 90}, {"action": "move_relative", "forward": 50, "right": 0}], "explanation": "Forward 1m, turn right 90, then forward 50cm"}
 """
 
 
@@ -135,9 +160,15 @@ def rule_based_parse(text):
     # Parse direction + distance
     # Matches: "go forward 2 meters", "move left 50cm", "north 100", etc.
     # Relative directions (depend on robot heading) → move_relative
+    # NOTE: longer synonyms first so e.g. "advance" wins over a partial match.
     relative_dirs = [
-        ("forward", 1, 0), ("ahead", 1, 0), ("up", 1, 0),
-        ("backward", -1, 0), ("down", -1, 0), ("back", -1, 0),
+        # forward family
+        ("forward", 1, 0), ("ahead", 1, 0), ("straight", 1, 0),
+        ("advance", 1, 0), ("front", 1, 0), ("up", 1, 0),
+        # backward family
+        ("backward", -1, 0), ("reverse", -1, 0), ("retreat", -1, 0),
+        ("back", -1, 0), ("down", -1, 0),
+        # lateral (note: lateral move is different from a turn — these still strafe)
         ("left", 0, -1),
         ("right", 0, 1),
     ]
@@ -159,6 +190,42 @@ def rule_based_parse(text):
             continue
 
         matched = False
+
+        # ---- TURN commands (pure rotation, not strafe) ----
+        # "turn left", "turn right" → ±90°
+        # "turn 45", "rotate 90 deg" → signed degrees as written
+        # "turn left 45" / "turn right 90" → direction sets sign
+        # "spin around" / "turn around" / "180" → 180°
+        if re.search(r'\b(spin\s+around|turn\s+around|turnaround)\b', part):
+            commands.append({"action": "turn_relative", "degrees": 180})
+            matched = True
+        if not matched:
+            tm = re.search(
+                r'(?:turn|rotate|spin)\s*(left|right)?\s*(-?\d+\.?\d*)?\s*(?:deg|degrees|°)?',
+                part)
+            if tm and (tm.group(1) or tm.group(2)):
+                word = tm.group(1)            # "left", "right", or None
+                deg_str = tm.group(2)         # number or None
+                if word == "left" and not deg_str:
+                    degrees = -90.0
+                elif word == "right" and not deg_str:
+                    degrees = 90.0
+                elif deg_str is not None:
+                    degrees = float(deg_str)
+                    if word == "left":
+                        degrees = -abs(degrees)
+                    elif word == "right":
+                        degrees = abs(degrees)
+                    # else: signed value as written (negative = left, positive = right)
+                else:
+                    degrees = None
+                if degrees is not None:
+                    commands.append({"action": "turn_relative",
+                                     "degrees": round(degrees, 1)})
+                    matched = True
+
+        if matched:
+            continue
 
         # Try relative directions first (forward/backward/left/right)
         for dirname, fwd_mul, right_mul in relative_dirs:
@@ -254,7 +321,8 @@ def translate(user_input):
         if "error" not in ai_response:
             commands = ai_response.get("commands", [])
             # Validate: only allow known actions
-            valid_actions = {"set_target", "move_relative", "backtrack", "stop", "reset"}
+            valid_actions = {"set_target", "move_relative", "turn_relative",
+                             "backtrack", "stop", "reset"}
             validated = []
             for cmd in commands:
                 action = cmd.get("action", "")

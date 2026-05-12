@@ -36,7 +36,8 @@ enum Mode { MODE_AUTO, MODE_MANUAL };
 volatile Mode currentMode = MODE_MANUAL;
 char manualState[16]  = "stop";   // applied immediately while in manual mode
 volatile bool freshBoot   = true;
-volatile unsigned long lastSyncMs = 0;
+volatile unsigned long lastSyncMs    = 0;   // last successful server round-trip
+volatile unsigned long lastWifiOkMs  = 0;   // last time WiFi link was up (any cause)
 
 // --- Timing ---
 unsigned long lastScan  = 0;
@@ -241,16 +242,19 @@ void loop() {
     // ---- Ingest server response (mode / manual / queue) ----
     ingestPendingResp();
 
-    // ---- Deadman (no sync in too long → halt) ----
-    if (lastSyncMs > 0) {
-        unsigned long deadline = (currentMode == MODE_AUTO)
-            ? AUTO_DEADMAN_MS : MANUAL_DEADMAN_MS;
-        if (now - lastSyncMs > deadline) {
-            if (motors.getState() != Motors::M_STOP) {
-                motors.stop();
-                strncpy(manualState, "stop", sizeof(manualState));
-                Debug::logf("[DEADMAN] no sync %lums → stop", now - lastSyncMs);
-            }
+    // ---- Deadman: WiFi-link based, NOT HTTP latency ----
+    // Avoidance, e-brake, and manual driving all run locally on Core 1 from
+    // ultrasonic sensor data. They do not need the server. A slow internet
+    // connection used to trip the old HTTP-latency deadman and stutter-stop
+    // the robot mid-avoid; that was wrong. We only halt when the WiFi link
+    // itself has been down long enough that the operator truly can't reach us.
+    bool wifiUp = (WiFi.status() == WL_CONNECTED);
+    if (wifiUp) lastWifiOkMs = now;
+    if (lastWifiOkMs > 0 && !wifiUp && (now - lastWifiOkMs > WIFI_DEADMAN_MS)) {
+        if (motors.getState() != Motors::M_STOP) {
+            motors.stop();
+            strncpy(manualState, "stop", sizeof(manualState));
+            Debug::logf("[DEADMAN] WiFi down %lums → stop", now - lastWifiOkMs);
         }
     }
 
@@ -258,24 +262,39 @@ void loop() {
 
     // ---- Drive: manual is hard override; auto drains queue ----
     if (currentMode == MODE_MANUAL) {
-        // Forward command goes through three zones:
-        //   distFront >  OBSTACLE_SLOW  -> full SPEED_CRUISE (executeManualState)
-        //   OBSTACLE_CLOSE..OBSTACLE_SLOW -> AVOID_BYPASS_SPEED (less momentum)
-        //   distFront <  OBSTACLE_CLOSE -> brake (e-brake)
-        // Idle / reverse / turn / stop pass straight through.
-        // Servo locks to forward whenever we're commanding forward, so the
-        // e-brake decision doesn't act on stale data while the servo wanders.
+        // Manual forward with assisted avoidance:
+        //   1. distFront >= OBSTACLE_SLOW    -> normal forward (executeManualState)
+        //   2. distFront <  OBSTACLE_SLOW    -> updateManualAvoid takes over:
+        //        AV_BRAKE (200ms)  → pick side → turn 30° → check → drive 30cm
+        //        Repeats per increment up to AVOID_MAX_INCREMENTS (120°).
+        //        On give-up: stays braked until distFront >= OBSTACLE_CLEAR.
+        //   3. User releases forward         -> cancelManualAvoid (immediate stop)
+        // While avoid is active the FSM owns sweepMode (BRAKE/PICK use NORMAL,
+        // DRIVE_PAST uses BYPASS_* to watch the near-side wall).
         bool wantsForward = (strcmp(manualState, "forward") == 0);
-        currentSweepMode = wantsForward ? SWEEP_FRONT_LOCK : SWEEP_NORMAL;
+
+        // User let go of forward (or pressed back/turn/stop) mid-avoid → cancel.
+        if (!wantsForward) {
+            navigator.cancelManualAvoid(motors);
+        }
+
         if (wantsForward) {
-            if (sensors.distFront < OBSTACLE_CLOSE) {
-                motors.brake();
-            } else if (sensors.distFront < OBSTACLE_SLOW) {
-                motors.setState(Motors::M_FORWARD, AVOID_BYPASS_SPEED);
-            } else {
-                executeManualState();
+            currentSweepMode = SWEEP_FRONT_LOCK;  // default; avoid overrides per phase
+            if (!navigator.updateManualAvoid(sensors, motors, pathfinder,
+                                             encoder.posX, encoder.posY,
+                                             sensors.heading)) {
+                // Approach slowdown: between OBSTACLE_SLOWDOWN and OBSTACLE_SLOW,
+                // run at SPEED_SLOW instead of SPEED_CRUISE. Cruise momentum is
+                // too high for the brake to dump fully in 30cm; pre-slowing
+                // gives the brake enough margin to actually stop the chassis.
+                if (sensors.distFront < OBSTACLE_SLOWDOWN) {
+                    motors.setState(Motors::M_FORWARD, SPEED_SLOW);
+                } else {
+                    executeManualState();
+                }
             }
         } else {
+            currentSweepMode = SWEEP_NORMAL;
             executeManualState();
         }
     } else {
@@ -378,15 +397,19 @@ snapshot:
 // ============================================
 // Returns the next sweepStep for the active sweep mode.
 //   NORMAL       -> ping-pong 0..SWEEP_STEPS-1
-//   BYPASS_LEFT  -> alternate idx 2 (front 90°)  ↔ idx 4 (left  160°)
-//   BYPASS_RIGHT -> alternate idx 2 (front 90°)  ↔ idx 0 (right 20°)
+//   BYPASS_LEFT  -> alternate idx 2 (front 90°)  ↔ idx 3 (near-left  125°)
+//   BYPASS_RIGHT -> alternate idx 2 (front 90°)  ↔ idx 1 (near-right  55°)
 //   FRONT_LOCK   -> always idx 2 (servo never leaves 90°)
+// Why near-side (idx 1/3) not far-side (idx 0/4): during AV_DRIVE_PAST the
+// chassis just turned 30° away from an obstacle; the wall is now ~30° off
+// the new heading, which falls on the near-side cone (35° off-center).
+// Far-side (160°/20°) is nearly perpendicular and misses the clipping zone.
 // In non-NORMAL modes, sweepDir is unused but left untouched so a return to
 // NORMAL just resumes ping-pong direction from wherever we are.
 static int advanceSweepStep(SweepMode mode, int curStep, int* dir) {
     if (mode == SWEEP_FRONT_LOCK)   return 2;
-    if (mode == SWEEP_BYPASS_LEFT)  return (curStep == 2) ? 4 : 2;
-    if (mode == SWEEP_BYPASS_RIGHT) return (curStep == 2) ? 0 : 2;
+    if (mode == SWEEP_BYPASS_LEFT)  return (curStep == 2) ? 3 : 2;
+    if (mode == SWEEP_BYPASS_RIGHT) return (curStep == 2) ? 1 : 2;
     int next = curStep + *dir;
     if (next >= SWEEP_STEPS) { *dir = -1; return SWEEP_STEPS - 2; }
     if (next < 0)            { *dir =  1; return 1; }
@@ -415,6 +438,14 @@ void serviceSweepStateMachine() {
         currentAngleIdx = -1;
         servoSettleUntil = 0;
         sweepStep = advanceSweepStep(currentSweepMode, sweepStep, &sweepDir);
+        // Reset measuredAngleIdx so Core 0 will fire again on the NEXT
+        // publication. Critical for FRONT_LOCK and BYPASS_* modes where
+        // advanceSweepStep returns the SAME idx repeatedly — without this
+        // reset, Core 0's `idx == measuredAngleIdx` guard skipped every
+        // republication and the ultrasonic stopped firing entirely (distFront
+        // froze at whatever value was captured the first time the mode
+        // engaged, so the e-brake never saw approaching obstacles).
+        measuredAngleIdx = -1;
     }
 }
 
@@ -639,6 +670,7 @@ void syncWithServer() {
                     c.heading = v["heading"] | 0.0f;
                     if      (strcmp(t, "set_target")    == 0) c.type = CMD_SET_TARGET;
                     else if (strcmp(t, "move_relative") == 0) c.type = CMD_MOVE_RELATIVE;
+                    else if (strcmp(t, "turn_relative") == 0) c.type = CMD_TURN_RELATIVE;
                     else if (strcmp(t, "backtrack")     == 0) c.type = CMD_BACKTRACK;
                     else if (strcmp(t, "reset")         == 0) c.type = CMD_RESET;
                     else if (strcmp(t, "clear_map")     == 0) c.type = CMD_CLEAR_MAP;
@@ -682,6 +714,8 @@ void ingestPendingResp() {
         if (currentMode != MODE_MANUAL) {
             currentMode = MODE_MANUAL;
             navigator.state = NAV_IDLE;
+            navigator.avoidActive = false;   // drop any in-flight auto avoid
+            navigator.avoidGaveUp = false;
             motors.stop();   // immediate halt during the mode transition
             Debug::log("[MODE] manual hard override");
         }
@@ -691,6 +725,8 @@ void ingestPendingResp() {
         if (local.mode != currentMode) {
             currentMode = local.mode;
             navigator.state = NAV_IDLE;
+            navigator.avoidActive = false;
+            navigator.avoidGaveUp = false;
             Debug::logf("[MODE] -> %s",
                         currentMode == MODE_AUTO ? "auto" : "manual");
             if (currentMode == MODE_AUTO) {
@@ -761,6 +797,18 @@ void executeQueuedCmd(const QueuedCmd &cmd) {
             navigator.setTarget(motors, encoder.posX, encoder.posY);
             Debug::logf("[QUEUE] -> move_relative id=%lu fwd=%.0f right=%.0f",
                         cmd.id, cmd.y, cmd.x);
+            break;
+        }
+        case CMD_TURN_RELATIVE: {
+            // Pure rotation: no X,Y target — use turnOnly so pathfinder skips
+            // its distance-based reached check; navigator sets pf.targetReached
+            // when the heading goal is hit.
+            pathfinder.hasTarget = true;
+            pathfinder.targetReached = false;
+            pathfinder.turnOnly = true;
+            navigator.setTurnTarget(motors, sensors.heading, cmd.heading);
+            Debug::logf("[QUEUE] -> turn_relative id=%lu deg=%.1f",
+                        cmd.id, cmd.heading);
             break;
         }
         case CMD_BACKTRACK:

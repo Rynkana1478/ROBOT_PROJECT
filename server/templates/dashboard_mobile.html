@@ -1,0 +1,1284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Ultrasonic · Mobile</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+        :root {
+            --bg:        #0E0E12;
+            --bg-2:      #16161D;
+            --panel:     rgba(107,91,255,0.06);
+            --panel-bd:  rgba(107,91,255,0.20);
+            --accent-1:  #6B5BFF;
+            --accent-2:  #4FA3FF;
+            --highlight: #E94FBF;
+            --text:      #FFFFFF;
+            --muted:     #A8A8B3;
+            --danger:    #FF4F6E;
+            --warn:      #FFB74F;
+            --ok:        #4FE0A4;
+        }
+
+        * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+        html, body {
+            height: 100vh; width: 100vw;
+            overflow: hidden;
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            user-select: none; -webkit-user-select: none;
+            touch-action: manipulation;
+            overscroll-behavior: none;
+        }
+        body {
+            position: relative;
+            background:
+                radial-gradient(ellipse 600px 500px at 12% 8%, rgba(107,91,255,0.28), transparent 60%),
+                radial-gradient(ellipse 500px 400px at 92% 92%, rgba(79,163,255,0.18), transparent 60%),
+                radial-gradient(ellipse 300px 300px at 90% 5%, rgba(233,79,191,0.14), transparent 60%),
+                var(--bg);
+        }
+        input, button, select { font-family: inherit; }
+
+        /* ============ ROTATE HINT (portrait only) ============ */
+        .rotate-hint {
+            display: none;
+            position: fixed; inset: 0;
+            background: var(--bg);
+            z-index: 999;
+            flex-direction: column;
+            align-items: center; justify-content: center;
+            gap: 18px;
+            padding: 32px;
+            text-align: center;
+        }
+        .rotate-icon {
+            width: 80px; height: 80px;
+            border-radius: 18px;
+            background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+            display: flex; align-items: center; justify-content: center;
+            font-size: 2.2em;
+            animation: rotateSpin 2.5s ease-in-out infinite;
+        }
+        @keyframes rotateSpin {
+            0%, 40% { transform: rotate(0deg); }
+            60%, 100% { transform: rotate(90deg); }
+        }
+        .rotate-hint h2 { font-size: 1.1em; font-weight: 600; }
+        .rotate-hint p { font-size: 0.85em; color: var(--muted); max-width: 260px; }
+
+        @media (orientation: portrait) {
+            .rotate-hint { display: flex; }
+        }
+
+        /* ============ TOP STRIP ============ */
+        .top-strip {
+            position: fixed; top: 0; left: 0; right: 0;
+            display: flex; justify-content: space-between; align-items: center;
+            height: 36px;
+            padding: 0 12px;
+            z-index: 50;
+            background: rgba(14,14,18,0.5);
+            backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--panel-bd);
+            font-size: 0.72em;
+        }
+        .strip-left, .strip-right { display: flex; align-items: center; gap: 8px; }
+
+        .brand-mark-sm {
+            width: 20px; height: 20px; border-radius: 6px;
+            background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+            display: flex; align-items: center; justify-content: center;
+            font-size: 0.75em; font-weight: 800;
+            box-shadow: 0 0 10px rgba(107,91,255,0.5);
+        }
+        .strip-stat {
+            display: inline-flex; align-items: center; gap: 5px;
+            font-variant-numeric: tabular-nums;
+        }
+        .strip-stat .lab { color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.85em; }
+        .strip-stat .val { font-weight: 600; }
+        .strip-stat .val.warn   { color: var(--warn); }
+        .strip-stat .val.danger { color: var(--danger); }
+
+        .conn-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: var(--danger);
+            transition: background 0.3s, box-shadow 0.3s;
+        }
+        .conn-dot.online { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+
+        .ctrl-mini {
+            padding: 2px 9px; border-radius: 10px;
+            font-size: 0.95em; font-weight: 600;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+        .ctrl-mini.auto    { color: var(--accent-2); border-color: rgba(79,163,255,0.4); }
+        .ctrl-mini.manual  { color: var(--highlight); border-color: rgba(233,79,191,0.4); }
+        .ctrl-mini.avoid   { color: var(--danger); border-color: var(--danger);
+                             animation: avoidPulse 1s infinite; }
+        @keyframes avoidPulse {
+            0%,100% { box-shadow: 0 0 0 0 rgba(255,79,110,0.4); }
+            50%     { box-shadow: 0 0 0 5px rgba(255,79,110,0); }
+        }
+
+        .warn-dot {
+            display: none;
+            width: 7px; height: 7px; border-radius: 50%;
+            background: var(--highlight);
+            box-shadow: 0 0 6px var(--highlight);
+            animation: blinkDot 1.2s infinite;
+        }
+        @keyframes blinkDot { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+        .dbg-mini {
+            background: transparent;
+            border: 1px solid rgba(255,255,255,0.15);
+            color: var(--muted);
+            padding: 2px 8px; border-radius: 10px;
+            font-size: 0.85em;
+        }
+        .dbg-mini.active { background: var(--highlight); color: #fff; border-color: var(--highlight); }
+
+        /* ============ GAMEPAD PADS (split: vertical L, horizontal R) ============ */
+        .pad {
+            position: fixed;
+            display: flex;
+            z-index: 30;
+        }
+        /* Left side — FWD on top, BACK below (vertical stack) */
+        .pad-left  { left: 10px; top: 46px; flex-direction: column; gap: 8px; }
+        /* Right side — LEFT and RIGHT side-by-side (horizontal row), like a steering pair */
+        .pad-right { right: 10px; top: 50%; transform: translateY(-50%); flex-direction: row; gap: 8px; }
+
+        .drive-btn {
+            width: 72px; height: 70px;
+            border: 1px solid var(--panel-bd);
+            border-radius: 18px;
+            background: linear-gradient(160deg, rgba(107,91,255,0.18), rgba(79,163,255,0.08));
+            backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+            color: var(--text);
+            font-size: 0.7em; font-weight: 600;
+            letter-spacing: 0.05em;
+            cursor: pointer;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            gap: 4px;
+            transition: transform 0.08s, background 0.15s, box-shadow 0.15s;
+        }
+        .drive-btn .arrow { font-size: 1.6em; line-height: 1; font-weight: 400; }
+        .drive-btn:active, .drive-btn.held {
+            transform: scale(0.93);
+            background: linear-gradient(160deg, var(--accent-1), var(--accent-2));
+            box-shadow: 0 0 24px rgba(107,91,255,0.7);
+            border-color: var(--accent-2);
+        }
+
+        .stop-btn {
+            position: fixed; left: 10px; bottom: 10px;
+            width: 72px; height: 56px;
+            border-radius: 16px;
+            background: linear-gradient(160deg, rgba(233,79,191,0.20), rgba(255,79,110,0.12));
+            border: 1px solid var(--highlight);
+            color: var(--highlight);
+            font-weight: 700; letter-spacing: 0.12em; font-size: 0.78em;
+            cursor: pointer;
+            backdrop-filter: blur(10px);
+            transition: all 0.15s;
+            z-index: 30;
+        }
+        .stop-btn:active {
+            transform: scale(0.93);
+            background: var(--highlight); color: #fff;
+            box-shadow: 0 0 24px var(--highlight);
+        }
+
+        .mode-btn {
+            position: fixed; right: 10px; bottom: 10px;
+            width: 72px; height: 56px;
+            border-radius: 16px;
+            border: 1px solid var(--panel-bd);
+            background: linear-gradient(160deg, rgba(79,163,255,0.22), rgba(107,91,255,0.10));
+            color: var(--text);
+            font-weight: 700; font-size: 0.78em; letter-spacing: 0.06em;
+            cursor: pointer;
+            backdrop-filter: blur(10px);
+            transition: all 0.15s;
+            z-index: 30;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+        }
+        .mode-btn .mode-sub { font-size: 0.62em; color: var(--muted); font-weight: 500; margin-top: 1px; letter-spacing: 0.04em; }
+        .mode-btn.is-auto { border-color: var(--accent-2); }
+        .mode-btn.is-auto .mode-sub { color: var(--accent-2); }
+        .mode-btn:active { transform: scale(0.93); }
+
+        /* ============ MAP ============ */
+        .map-wrap {
+            position: absolute;
+            top: 42px; bottom: 110px;          /* clear input dock + chat float */
+            left: 92px; right: 172px;          /* clear pad-left, clear horizontal pad-right */
+            display: flex; align-items: center; justify-content: center;
+            z-index: 10;
+        }
+        canvas#gridMap {
+            max-width: 100%;
+            max-height: 100%;
+            aspect-ratio: 1 / 1;
+            border: 1px solid var(--panel-bd);
+            border-radius: 14px;
+            background: var(--bg-2);
+            box-shadow:
+                0 0 50px rgba(107,91,255,0.18),
+                inset 0 0 30px rgba(107,91,255,0.06);
+            image-rendering: pixelated;
+        }
+
+        /* ============ INPUT DOCK (compact) ============ */
+        /* Centered at bottom — pad-right is at top, so bottom-center is clear of it.
+           Min-width-of-200 reservation ensures clearance from STOP (left) and MODE (right). */
+        .input-dock {
+            position: fixed; bottom: 10px;
+            left: 50%; transform: translateX(-50%);
+            z-index: 35;
+            display: flex; flex-direction: column; align-items: center; gap: 6px;
+            width: min(380px, calc(100vw - 200px));
+        }
+
+        .chat-float {
+            display: flex; flex-direction: column; gap: 3px;
+            align-items: center;
+            max-height: 50px; overflow: hidden;
+            width: min(100%, 380px);
+            pointer-events: none;
+        }
+        .chat-bubble {
+            max-width: 95%;
+            padding: 4px 10px;
+            border-radius: 10px;
+            font-size: 0.7em;
+            line-height: 1.4;
+            background: rgba(14,14,18,0.65);
+            backdrop-filter: blur(8px);
+            border: 1px solid var(--panel-bd);
+            animation: bubbleIn 0.3s ease;
+            opacity: 1;
+            transition: opacity 1s;
+        }
+        .chat-bubble.fading { opacity: 0; }
+        .chat-bubble.user { border-color: rgba(79,163,255,0.4); color: var(--accent-2); }
+        .chat-bubble.ai { color: var(--text); }
+        .chat-bubble.cmd { color: var(--ok); border-color: rgba(79,224,164,0.3); font-family: 'SF Mono', Consolas, monospace; }
+        .chat-bubble.error { color: var(--danger); border-color: var(--danger); }
+        @keyframes bubbleIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: none; }
+        }
+
+        .input-row {
+            display: flex; align-items: center; gap: 4px;
+            width: min(100%, 380px);
+            padding: 3px;
+            background: rgba(14,14,18,0.7);
+            backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--panel-bd);
+            border-radius: 18px;
+            box-shadow: 0 0 24px rgba(107,91,255,0.18);
+        }
+        .mode-toggle {
+            display: flex; gap: 0;
+            padding: 1px;
+            background: rgba(255,255,255,0.04);
+            border-radius: 12px;
+            flex-shrink: 0;
+        }
+        .mode-tab {
+            padding: 3px 8px;
+            font-size: 0.68em;
+            color: var(--muted);
+            background: transparent;
+            border: none;
+            border-radius: 11px;
+            cursor: pointer;
+            font-weight: 500;
+            letter-spacing: 0.02em;
+        }
+        .mode-tab.active {
+            background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+            color: #fff;
+            font-weight: 600;
+        }
+        .input-field {
+            flex: 1;
+            min-width: 0;
+            padding: 5px 10px;
+            background: transparent;
+            border: none;
+            color: var(--text);
+            font-size: 0.78em;
+            outline: none;
+        }
+        .input-field::placeholder { color: var(--muted); }
+        .coord-fields { display: none; flex: 1; gap: 3px; align-items: center; }
+        .coord-fields.active { display: flex; }
+        .coord-fields input {
+            width: 50px;
+            padding: 5px 8px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid var(--panel-bd);
+            color: var(--text);
+            border-radius: 8px;
+            font-size: 0.74em;
+            outline: none;
+            text-align: center;
+            font-variant-numeric: tabular-nums;
+        }
+        .coord-fields .lab { color: var(--muted); font-size: 0.66em; font-weight: 500; }
+
+        .icon-btn {
+            width: 30px; height: 30px;
+            border-radius: 50%;
+            border: none;
+            background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+            color: #fff;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 0.85em;
+            transition: all 0.15s;
+            flex-shrink: 0;
+        }
+        .icon-btn:active { transform: scale(0.9); }
+        .icon-btn.mic {
+            background: rgba(255,255,255,0.06);
+            border: 1px solid var(--panel-bd);
+            color: var(--muted);
+        }
+        .icon-btn.mic.listening {
+            background: var(--highlight); color: #fff; border-color: var(--highlight);
+            animation: micPulse 1s infinite;
+        }
+        @keyframes micPulse {
+            0%,100% { box-shadow: 0 0 0 0 rgba(233,79,191,0.5); }
+            50%     { box-shadow: 0 0 0 6px rgba(233,79,191,0); }
+        }
+
+        .ai-queue-badge {
+            display: inline-block;
+            background: var(--highlight); color: #fff;
+            font-size: 0.6em; padding: 1px 5px; border-radius: 7px; font-weight: 600;
+        }
+
+        /* ============ DEBUG VIEW ============ */
+        .debug-view { display: none; }
+        body.debug .play-view { display: none; }
+        body.debug .debug-view {
+            display: flex; flex-direction: column;
+            position: absolute; inset: 42px 8px 8px 8px;
+            gap: 8px;
+            overflow: auto;
+            padding-bottom: 8px;
+        }
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--panel-bd);
+            border-radius: 10px;
+            padding: 10px;
+            backdrop-filter: blur(8px);
+        }
+        .panel h3 {
+            font-size: 0.66em; font-weight: 600; color: var(--muted);
+            text-transform: uppercase; letter-spacing: 0.08em;
+            margin-bottom: 8px;
+        }
+        .stat-grid {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px;
+        }
+        .stat {
+            background: rgba(255,255,255,0.03);
+            padding: 5px 8px; border-radius: 6px;
+        }
+        .stat .lab { font-size: 0.58em; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+        .stat .val { font-size: 0.82em; font-weight: 600; margin-top: 1px; font-variant-numeric: tabular-nums; }
+        .dist-ok     { color: var(--ok); }
+        .dist-warn   { color: var(--warn); }
+        .dist-danger { color: var(--danger); }
+
+        .test-buttons-row {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px;
+        }
+        .test-btn {
+            padding: 8px 8px; text-align: center;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid var(--panel-bd);
+            color: var(--text);
+            border-radius: 8px;
+            font-size: 0.72em;
+            cursor: pointer;
+            touch-action: manipulation;       /* removes the 300ms tap delay on mobile */
+            transition: transform 0.08s, background 0.15s, box-shadow 0.15s, border-color 0.15s;
+            -webkit-tap-highlight-color: transparent;
+        }
+        /* Press feedback (while finger/cursor is down) */
+        .test-btn:active {
+            transform: scale(0.94);
+            background: rgba(107,91,255,0.24);
+            border-color: var(--accent-1);
+            box-shadow: 0 0 14px rgba(107,91,255,0.5);
+        }
+        /* Tap pulse — added by JS on click, lasts 0.45s so a quick tap is still visible */
+        .test-btn.tapped {
+            animation: tapRipple 0.45s ease-out;
+        }
+        @keyframes tapRipple {
+            0%   { box-shadow: 0 0 0 0   rgba(107,91,255,0.55); }
+            100% { box-shadow: 0 0 0 14px rgba(107,91,255,0);    }
+        }
+
+        .test-btn.primary {
+            background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+            border: none; font-weight: 600;
+            color: #fff;
+        }
+        .test-btn.primary:active {
+            background: linear-gradient(135deg, var(--accent-2), var(--highlight));
+            box-shadow: 0 0 18px var(--highlight);
+        }
+        .test-btn.primary.tapped {
+            animation: tapRippleHi 0.45s ease-out;
+        }
+        @keyframes tapRippleHi {
+            0%   { box-shadow: 0 0 0 0   rgba(233,79,191,0.65); }
+            100% { box-shadow: 0 0 0 16px rgba(233,79,191,0);    }
+        }
+
+        .test-btn.danger { color: var(--highlight); border-color: var(--highlight); }
+        .test-btn.danger:active {
+            background: var(--highlight);
+            color: #fff;
+            box-shadow: 0 0 16px var(--highlight);
+        }
+        .test-btn.danger.tapped { animation: tapRippleHi 0.45s ease-out; }
+
+        /* Debug toggle in top strip — also gets press feedback */
+        .dbg-mini { transition: all 0.15s; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+        .dbg-mini:active { transform: scale(0.92); background: rgba(233,79,191,0.2); color: var(--highlight); border-color: var(--highlight); }
+
+        .console {
+            background: rgba(0,0,0,0.4);
+            border: 1px solid var(--panel-bd);
+            border-radius: 8px;
+            padding: 8px;
+            font-family: 'SF Mono', Consolas, Menlo, monospace;
+            font-size: 0.66em;
+            line-height: 1.5;
+            color: #C9C9D3;
+            min-height: 100px;
+            max-height: 130px;
+            overflow-y: auto;
+        }
+        .console .log-line { white-space: pre-wrap; word-break: break-all; }
+        .console .log-error { color: var(--danger); }
+        .console .log-warn { color: var(--warn); }
+        .console .log-test { color: var(--accent-2); }
+        .console .log-ok { color: var(--ok); }
+        .console .log-time { color: #6F6F7A; }
+
+        .lan-info {
+            font-size: 0.66em; color: var(--muted);
+            background: rgba(255,255,255,0.03);
+            padding: 5px 8px; border-radius: 6px;
+            line-height: 1.5;
+        }
+
+        /* ============ THEMED SCROLLBARS (global) ============ */
+        /* Firefox: applies to every scrollable element including html */
+        * {
+            scrollbar-width: thin;
+            scrollbar-color: rgba(107,91,255,0.7) rgba(255,255,255,0.05);
+        }
+        html { scrollbar-color: rgba(107,91,255,0.7) rgba(14,14,18,0.4); }
+
+        /* WebKit (Chrome/Safari/Edge): unprefixed selector applies to all scrollbars */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+            -webkit-appearance: none;
+            background: rgba(14,14,18,0.4);
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(255,255,255,0.04);
+            border-radius: 8px;
+            margin: 4px 0;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: linear-gradient(180deg, var(--accent-1), var(--accent-2));
+            border-radius: 8px;
+            box-shadow: 0 0 8px rgba(107,91,255,0.5);
+            border: 1px solid rgba(255,255,255,0.06);
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(180deg, var(--accent-2), var(--highlight));
+            box-shadow: 0 0 10px var(--highlight);
+        }
+        ::-webkit-scrollbar-thumb:active {
+            background: var(--highlight);
+        }
+        ::-webkit-scrollbar-corner { background: transparent; }
+        /* Fade-out hint at the bottom of the debug view to signal "more below" */
+        body.debug .debug-view {
+            scroll-behavior: smooth;
+            -webkit-overflow-scrolling: touch;
+            mask-image: linear-gradient(to bottom,
+                #000 0,
+                #000 calc(100% - 24px),
+                rgba(0,0,0,0.5) 100%);
+            -webkit-mask-image: linear-gradient(to bottom,
+                #000 0,
+                #000 calc(100% - 24px),
+                rgba(0,0,0,0.5) 100%);
+        }
+        /* When user scrolls to bottom, JS removes the fade so nothing looks cut off */
+        body.debug .debug-view.at-bottom {
+            mask-image: none;
+            -webkit-mask-image: none;
+        }
+
+        /* ============ DEBUG MORPH TRANSITION ============ */
+        ::view-transition-old(root),
+        ::view-transition-new(root) {
+            animation-duration: 0.40s;
+            animation-timing-function: cubic-bezier(0.5, 0, 0.1, 1);
+        }
+        ::view-transition-old(root) { animation-name: morphOut; }
+        ::view-transition-new(root) { animation-name: morphIn; }
+        @keyframes morphOut {
+            to { opacity: 0; transform: scale(1.05); filter: blur(5px); }
+        }
+        @keyframes morphIn {
+            from { opacity: 0; transform: scale(0.95); filter: blur(5px); }
+            to   { opacity: 1; transform: none; filter: none; }
+        }
+
+        body.toggling.debug .debug-view > * { animation: panelIn 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+        body.toggling.debug .debug-view > *:nth-child(1) { animation-delay: 0.03s; }
+        body.toggling.debug .debug-view > *:nth-child(2) { animation-delay: 0.08s; }
+        body.toggling.debug .debug-view > *:nth-child(3) { animation-delay: 0.13s; }
+        body.toggling.debug .debug-view > *:nth-child(4) { animation-delay: 0.18s; }
+        body.toggling.debug .debug-view > *:nth-child(5) { animation-delay: 0.23s; }
+        @keyframes panelIn {
+            from { opacity: 0; transform: translateY(8px) scale(0.97); }
+            to   { opacity: 1; transform: none; }
+        }
+
+        body.toggling:not(.debug) .play-view .pad-left   { animation: padIn 0.45s 0.04s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+        body.toggling:not(.debug) .play-view .pad-right  { animation: padIn 0.45s 0.08s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+        body.toggling:not(.debug) .play-view .map-wrap   { animation: padIn 0.45s 0.06s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+        body.toggling:not(.debug) .play-view .input-dock { animation: padIn 0.45s 0.16s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+        body.toggling:not(.debug) .play-view .stop-btn,
+        body.toggling:not(.debug) .play-view .mode-btn   { animation: padIn 0.45s 0.12s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+        @keyframes padIn {
+            from { opacity: 0; transform: scale(0.92); }
+            to   { opacity: 1; transform: none; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ROTATE HINT -->
+    <div class="rotate-hint">
+        <div class="rotate-icon">📱</div>
+        <h2>Rotate your phone</h2>
+        <p>This dashboard is built for landscape orientation. Turn your device sideways for the gamepad layout.</p>
+    </div>
+
+    <!-- ============ TOP STRIP (always-on essentials) ============ -->
+    <div class="top-strip">
+        <div class="strip-left">
+            <div class="brand-mark-sm">U</div>
+            <span class="conn-dot" id="connDot"></span>
+            <div id="controlBadge" class="ctrl-mini auto">Auto</div>
+            <span class="warn-dot" id="anyWarn"></span>
+        </div>
+        <div class="strip-right">
+            <div class="strip-stat"><span class="lab">F</span><span class="val" id="stripFront">--</span></div>
+            <div class="strip-stat"><span class="lab">H</span><span class="val" id="stripHeading">--</span></div>
+            <div class="strip-stat"><span class="lab">B</span><span class="val" id="stripBatt">--</span></div>
+            <button id="dbgToggle" class="dbg-mini" onclick="toggleDebug()">dbg</button>
+        </div>
+    </div>
+
+    <!-- ============ PLAY VIEW ============ -->
+    <div class="play-view">
+
+        <!-- LEFT PAD: forward / back (vertical stack) -->
+        <div class="pad pad-left">
+            <button class="drive-btn" data-cmd="forward"><span class="arrow">▲</span><span>FWD</span></button>
+            <button class="drive-btn" data-cmd="back"><span class="arrow">▼</span><span>BACK</span></button>
+        </div>
+
+        <!-- RIGHT PAD: left / right turn (horizontal pair, like steering) -->
+        <div class="pad pad-right">
+            <button class="drive-btn" data-cmd="left"><span class="arrow">◄</span><span>LEFT</span></button>
+            <button class="drive-btn" data-cmd="right"><span class="arrow">►</span><span>RIGHT</span></button>
+        </div>
+
+        <!-- STOP -->
+        <button class="stop-btn" onclick="sendCmd('stop')">STOP</button>
+
+        <!-- MODE -->
+        <button class="mode-btn" id="modeBtn" onclick="toggleMode()">
+            <span id="modeBtnLabel">MANUAL</span>
+            <span class="mode-sub" id="modeBtnSub">→ auto</span>
+        </button>
+
+        <!-- MAP -->
+        <div class="map-wrap">
+            <canvas id="gridMap" width="240" height="240"></canvas>
+        </div>
+
+        <!-- INPUT DOCK -->
+        <div class="input-dock">
+            <div class="chat-float" id="chatFloat"></div>
+            <div class="input-row">
+                <div class="mode-toggle">
+                    <button class="mode-tab active" data-imode="ai">AI</button>
+                    <button class="mode-tab" data-imode="coord">XY</button>
+                </div>
+                <input type="text" id="aiInput" class="input-field"
+                       placeholder="Tell the robot..."
+                       onkeydown="if(event.key==='Enter')submitInput()">
+                <div class="coord-fields" id="coordFields">
+                    <span class="lab">X</span><input type="number" id="targetX" value="0" step="10">
+                    <span class="lab">Y</span><input type="number" id="targetY" value="100" step="10">
+                </div>
+                <button class="icon-btn mic" id="voiceBtn" onclick="toggleVoice()">&#127908;</button>
+                <button class="icon-btn" onclick="submitInput()">&#10148;</button>
+                <span id="aiQueueBadge"></span>
+            </div>
+        </div>
+
+        <!-- Hidden but JS-referenced -->
+        <input type="hidden" id="userName" value="Anonymous">
+        <select id="voiceLang" style="display:none">
+            <option value="en-US" selected>EN</option>
+            <option value="th-TH">TH</option>
+        </select>
+    </div>
+
+    <!-- ============ DEBUG VIEW ============ -->
+    <div class="debug-view">
+        <div class="panel">
+            <h3>Telemetry</h3>
+            <div class="stat-grid">
+                <div class="stat"><div class="lab">Front</div><div class="val" id="distFront">--</div></div>
+                <div class="stat"><div class="lab">Left</div><div class="val" id="distLeft">--</div></div>
+                <div class="stat"><div class="lab">Right</div><div class="val" id="distRight">--</div></div>
+                <div class="stat"><div class="lab">Heading</div><div class="val" id="heading">--</div></div>
+                <div class="stat"><div class="lab">Battery</div><div class="val" id="battery">--</div></div>
+                <div class="stat"><div class="lab">Mode</div><div class="val" id="mode">--</div></div>
+                <div class="stat"><div class="lab">Nav</div><div class="val" id="navState">--</div></div>
+                <div class="stat"><div class="lab">Pos</div><div class="val" id="position">--</div></div>
+                <div class="stat"><div class="lab">Grid</div><div class="val" id="gridPos">--</div></div>
+                <div class="stat"><div class="lab">Trav</div><div class="val" id="totalDist">--</div></div>
+                <div class="stat"><div class="lab">Crumbs</div><div class="val" id="crumbs">--</div></div>
+                <div class="stat"><div class="lab">Traction</div><div class="val" id="traction">--</div></div>
+                <div class="stat"><div class="lab">Encoders</div><div class="val" id="encTicks">--</div></div>
+                <div class="stat"><div class="lab">Queue</div><div class="val" id="queueDepth">0</div></div>
+                <div class="stat"><div class="lab">Last</div><div class="val" id="lastCmd">--</div></div>
+                <div class="stat"><div class="lab">Near L</div><div class="val" id="distNearLeft">--</div></div>
+                <div class="stat"><div class="lab">Near R</div><div class="val" id="distNearRight">--</div></div>
+                <div class="stat"><div class="lab">Target</div><div class="val" id="curTarget">none</div></div>
+                <div class="stat"><div class="lab">RSSI</div><div class="val" id="rssi">--</div></div>
+                <div class="stat"><div class="lab">Heap</div><div class="val" id="heap">--</div></div>
+                <div class="stat"><div class="lab">Up</div><div class="val" id="uptime">--</div></div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h3>Hardware Tests</h3>
+            <div class="test-buttons-row">
+                <button class="test-btn primary" onclick="sendCmd('test_all')">All</button>
+                <button class="test-btn" onclick="sendCmd('test_i2c')">I2C</button>
+                <button class="test-btn" onclick="sendCmd('test_mpu')">MPU</button>
+                <button class="test-btn" onclick="sendCmd('test_ultrasonic')">US</button>
+                <button class="test-btn" onclick="sendCmd('test_servo')">Servo</button>
+                <button class="test-btn" onclick="sendCmd('test_motors')">Motors</button>
+                <button class="test-btn" onclick="sendCmd('test_encoder')">Encoders</button>
+                <button class="test-btn" onclick="sendCmd('test_battery')">Battery</button>
+                <button class="test-btn danger" onclick="clearLogs()">Clear Log</button>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h3>Actions</h3>
+            <div class="test-buttons-row">
+                <button class="test-btn primary" onclick="sendCmd('auto')">Auto</button>
+                <button class="test-btn" onclick="sendCmd('backtrack')">Backtrack</button>
+                <button class="test-btn" onclick="sendCmd('reset')">Reset</button>
+                <button class="test-btn" onclick="sendCmd('calibrate')">Calibrate</button>
+                <button class="test-btn" onclick="setHeadingPrompt()">Set Heading</button>
+                <button class="test-btn danger" onclick="sendCmd('clear_map')">Clear Map</button>
+                <button class="test-btn danger" onclick="clearQueue()">Clear Queue</button>
+            </div>
+            <div style="margin-top:8px;font-size:0.7em;color:var(--muted)">
+                Status: <span id="targetStatus">No target</span> ·
+                AI: <span id="ollamaStatus">--</span> <span id="aiMethod"></span>
+            </div>
+        </div>
+
+        <div class="panel" style="padding:6px">
+            <div class="console" id="debugConsole">
+                <div class="log-line log-time">Waiting for connection...</div>
+            </div>
+        </div>
+
+        <div class="lan-info">
+            <strong>LAN:</strong>
+            {% for ip in lan_ips %}http://{{ ip }}:{{ server_port }} · {% endfor %}
+        </div>
+
+        <!-- mirror warning IDs in debug too -->
+        <div style="display:none">
+            <span id="battWarning"></span><span id="slipWarning"></span>
+            <span id="stallWarning"></span><span id="bootWarning"></span>
+            <span id="connStatus"></span>
+        </div>
+    </div>
+
+<script>
+const GRID_SIZE = {{ grid_size }};
+const CELL_SIZE_CM = 10;
+let debugLogIndex = 0;
+let chatIndex = 0;
+let gridCells = null;
+let lastGridRLE = '';
+let lastData = null;
+
+// ============ PREDICTION ENGINE ============
+const pred = {
+    posX: 0, posY: 0, velX: 0, velY: 0, heading: 0,
+    gridX: GRID_SIZE/2, gridY: GRID_SIZE/2,
+    targetX: GRID_SIZE/2, targetY: GRID_SIZE/2,
+    hasTarget: false,
+    renderX: GRID_SIZE/2, renderY: GRID_SIZE/2, renderHeading: 0,
+    lastUpdateTime: 0,
+    dataGridX: GRID_SIZE/2, dataGridY: GRID_SIZE/2,
+};
+
+function updatePrediction(d) {
+    const now = performance.now();
+    const dt = (now - pred.lastUpdateTime) / 1000;
+    if (pred.lastUpdateTime > 0 && dt > 0.05 && dt < 5) {
+        pred.velX = (d.pos_x - pred.posX) / dt;
+        pred.velY = (d.pos_y - pred.posY) / dt;
+    }
+    pred.posX = d.pos_x; pred.posY = d.pos_y; pred.heading = d.heading;
+    pred.dataGridX = d.grid_x; pred.dataGridY = d.grid_y;
+    pred.targetX = d.target_x; pred.targetY = d.target_y;
+    pred.hasTarget = d.has_target;
+    pred.lastUpdateTime = now;
+}
+
+function angleDiffJS(target, current) {
+    let d = target - current;
+    while (d > 180) d -= 360;
+    while (d < -180) d += 360;
+    return d;
+}
+
+function renderLoop() {
+    const now = performance.now();
+    const dt = (now - pred.lastUpdateTime) / 1000;
+    const clampedDt = Math.min(dt, 1.0);
+    const predPosX = pred.posX + pred.velX * clampedDt;
+    const predPosY = pred.posY + pred.velY * clampedDt;
+    const offsetCellsX = (predPosX - pred.posX) / CELL_SIZE_CM;
+    const offsetCellsY = (predPosY - pred.posY) / CELL_SIZE_CM;
+    const predGridX = pred.dataGridX + offsetCellsX;
+    const predGridY = pred.dataGridY + offsetCellsY;
+    pred.renderX += (predGridX - pred.renderX) * 0.25;
+    pred.renderY += (predGridY - pred.renderY) * 0.25;
+    pred.renderHeading += angleDiffJS(pred.heading, pred.renderHeading) * 0.3;
+    if (lastData) drawGrid(lastData, pred.renderX, pred.renderY, pred.renderHeading);
+    requestAnimationFrame(renderLoop);
+}
+requestAnimationFrame(renderLoop);
+
+// ============ DATA FETCH ============
+function fetchDashboard() {
+    fetch('/api/dashboard?debug_since=' + debugLogIndex + '&chat_since=' + chatIndex)
+        .then(r => r.json())
+        .then(data => {
+            updateDashboard(data.status);
+            if (data.debug.logs && data.debug.logs.length > 0) {
+                const con = document.getElementById('debugConsole');
+                data.debug.logs.forEach(line => {
+                    const div = document.createElement('div');
+                    div.className = 'log-line';
+                    if (line.includes('ERROR')) div.className += ' log-error';
+                    else if (line.includes('WARNING')) div.className += ' log-warn';
+                    else if (line.includes('[TEST]')) div.className += ' log-test';
+                    else if (line.includes(' OK')) div.className += ' log-ok';
+                    div.textContent = line;
+                    con.appendChild(div);
+                });
+                con.scrollTop = con.scrollHeight;
+                while (con.children.length > 200) con.removeChild(con.firstChild);
+            }
+            debugLogIndex = data.debug.total;
+            if (data.chat.messages && data.chat.messages.length > 0) {
+                data.chat.messages.forEach(msg => {
+                    if (msg.type === 'user') addAIBubble('[' + msg.user + '] ' + msg.text, 'user');
+                    else if (msg.type === 'ai') addAIBubble(msg.text, 'ai');
+                    else if (msg.type === 'cmd') addAIBubble(msg.text, 'cmd');
+                    else if (msg.type === 'error') addAIBubble(msg.text, 'error');
+                });
+            }
+            chatIndex = data.chat.total;
+        })
+        .catch(() => setDisconnected());
+}
+
+function updateDashboard(d) {
+    lastData = d;
+    updatePrediction(d);
+
+    document.getElementById('connDot').classList.toggle('online', !!d.connected);
+
+    const anyWarn = d.batt_low || d.slipping || d.stalled || d.fresh_boot;
+    document.getElementById('anyWarn').style.display = anyWarn ? 'inline-block' : 'none';
+
+    const ctrlBadge = document.getElementById('controlBadge');
+    const mode = d.robot_mode || d.mode || (d.auto ? 'auto' : 'manual');
+    if (d.avoid_active) { ctrlBadge.textContent = 'AVOID'; ctrlBadge.className = 'ctrl-mini avoid'; }
+    else if (mode === 'manual') { ctrlBadge.textContent = 'Manual'; ctrlBadge.className = 'ctrl-mini manual'; }
+    else { ctrlBadge.textContent = 'Auto'; ctrlBadge.className = 'ctrl-mini auto'; }
+
+    const modeBtn = document.getElementById('modeBtn');
+    const modeLab = document.getElementById('modeBtnLabel');
+    const modeSub = document.getElementById('modeBtnSub');
+    if (mode === 'auto') {
+        modeBtn.classList.add('is-auto');
+        modeLab.textContent = 'AUTO';
+        modeSub.textContent = '→ manual';
+    } else {
+        modeBtn.classList.remove('is-auto');
+        modeLab.textContent = 'MANUAL';
+        modeSub.textContent = '→ auto';
+    }
+
+    setDist('distFront', d.front);
+    setDist('distLeft', d.left);
+    setDist('distRight', d.right);
+    setDist('distNearLeft', d.near_left || 999);
+    setDist('distNearRight', d.near_right || 999);
+
+    // Top strip values
+    const sf = document.getElementById('stripFront');
+    sf.textContent = (d.front > 400 ? '>400' : d.front.toFixed(0));
+    sf.className = 'val' + (d.front < 15 ? ' danger' : d.front < 30 ? ' warn' : '');
+    document.getElementById('stripHeading').textContent = d.heading.toFixed(0) + '°';
+    const sb = document.getElementById('stripBatt');
+    sb.textContent = d.battery.toFixed(1) + 'V';
+    sb.className = 'val' + (d.battery < 6.5 ? ' danger' : d.battery < 7.0 ? ' warn' : '');
+
+    // Debug-only fields
+    document.getElementById('heading').textContent = d.heading.toFixed(1) + '°';
+    document.getElementById('position').textContent = d.pos_x.toFixed(0) + ', ' + d.pos_y.toFixed(0);
+    document.getElementById('gridPos').textContent = d.grid_x + ', ' + d.grid_y;
+    document.getElementById('totalDist').textContent = d.distance.toFixed(0) + 'cm';
+    document.getElementById('crumbs').textContent = d.crumbs;
+    document.getElementById('battery').textContent = d.battery.toFixed(1) + 'V';
+
+    const navEl = document.getElementById('navState');
+    navEl.textContent = d.nav_state || 'IDLE';
+
+    const tractionEl = document.getElementById('traction');
+    const tv = d.traction !== undefined ? d.traction : 1.0;
+    tractionEl.textContent = (tv * 100).toFixed(0) + '%';
+
+    const qDepth = (d.server_queue_size || 0) + (d.queue_size || 0);
+    document.getElementById('queueDepth').textContent = qDepth;
+
+    const lastCmdEl = document.getElementById('lastCmd');
+    lastCmdEl.textContent = d.last_completed_id ? '#' + d.last_completed_id : '--';
+
+    const modeEl = document.getElementById('mode');
+    modeEl.textContent = d.backtracking ? 'Bktrk' : (mode === 'auto' ? 'Auto' : 'Manual');
+
+    document.getElementById('curTarget').textContent = d.has_target
+        ? d.target_wx.toFixed(0) + ',' + d.target_wy.toFixed(0) : 'none';
+
+    const tStatusEl = document.getElementById('targetStatus');
+    if (d.stuck) tStatusEl.textContent = 'STUCK';
+    else if (d.backtracking) tStatusEl.textContent = 'Bktrk (' + d.crumbs + ')';
+    else if (d.target_reached) tStatusEl.textContent = 'Reached';
+    else if (d.has_target) {
+        const dist = Math.sqrt((d.target_wx-d.pos_x)**2 + (d.target_wy-d.pos_y)**2);
+        tStatusEl.textContent = 'Nav ' + dist.toFixed(0) + 'cm';
+    } else tStatusEl.textContent = 'No target';
+
+    document.getElementById('rssi').textContent = (d.wifi_rssi || '--');
+    document.getElementById('heap').textContent = d.free_heap ? (d.free_heap / 1024).toFixed(0) + 'K' : '--';
+    if (d.uptime) document.getElementById('uptime').textContent = Math.floor(d.uptime/60) + 'm';
+
+    if (d.grid && d.grid.length > 0 && d.grid !== lastGridRLE) {
+        gridCells = decodeGridRLE(d.grid);
+        lastGridRLE = d.grid;
+    }
+
+    document.getElementById('encTicks').textContent = (d.enc_l||0) + '/' + (d.enc_r||0);
+
+    const isAuto = mode === 'auto';
+    const targetRate = isAuto ? 1000 : 250;
+    if (targetRate !== currentPollRate) {
+        clearInterval(pollTimer);
+        currentPollRate = targetRate;
+        pollTimer = setInterval(fetchDashboard, currentPollRate);
+    }
+}
+
+function setDist(id, val) {
+    const el = document.getElementById(id);
+    el.textContent = (val > 400 ? '>400' : val.toFixed(0)) + 'cm';
+    el.className = 'val ' + (val < 15 ? 'dist-danger' : val < 30 ? 'dist-warn' : 'dist-ok');
+}
+
+function setDisconnected() {
+    document.getElementById('connDot').classList.remove('online');
+}
+
+function decodeGridRLE(rle) {
+    const parts = rle.split(',').map(Number);
+    const grid = new Uint8Array(GRID_SIZE * GRID_SIZE);
+    let idx = 0;
+    for (let i = 0; i < parts.length - 1; i += 2) {
+        const val = parts[i], count = parts[i + 1];
+        for (let j = 0; j < count && idx < grid.length; j++) grid[idx++] = val;
+    }
+    return grid;
+}
+
+// ============ GRID RENDERING ============
+function drawGrid(d, robotX, robotY, robotHeading) {
+    const canvas = document.getElementById('gridMap');
+    if (!canvas.offsetParent) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const dpi = window.devicePixelRatio || 1;
+    const sz = Math.floor(Math.min(rect.width, rect.height) * dpi);
+    if (canvas.width !== sz) { canvas.width = sz; canvas.height = sz; }
+
+    const ctx = canvas.getContext('2d');
+    const cellW = canvas.width / GRID_SIZE;
+    const cellH = canvas.height / GRID_SIZE;
+
+    ctx.fillStyle = '#16161D';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    if (gridCells) {
+        const cellColors = [
+            'rgba(107,91,255,0.12)',
+            '#FFB74F',
+            null,
+            'rgba(79,163,255,0.30)'
+        ];
+        for (let i = 0; i < gridCells.length; i++) {
+            const c = cellColors[gridCells[i]];
+            if (!c) continue;
+            const x = i % GRID_SIZE;
+            const y = GRID_SIZE - 1 - Math.floor(i / GRID_SIZE);
+            ctx.fillStyle = c;
+            ctx.fillRect(x * cellW, y * cellH, cellW, cellH);
+        }
+    }
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i <= GRID_SIZE; i++) {
+        ctx.beginPath(); ctx.moveTo(i*cellW, 0); ctx.lineTo(i*cellW, canvas.height); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, i*cellH); ctx.lineTo(canvas.width, i*cellH); ctx.stroke();
+    }
+
+    const rpx = robotX * cellW + cellW/2;
+    const rpy = (GRID_SIZE - 1 - robotY) * cellH + cellH/2;
+    if (robotX >= -1 && robotX <= GRID_SIZE && robotY >= -1 && robotY <= GRID_SIZE) {
+        const grad = ctx.createRadialGradient(rpx, rpy, 0, rpx, rpy, cellW * 1.6);
+        grad.addColorStop(0, 'rgba(233,79,191,0.5)');
+        grad.addColorStop(1, 'rgba(233,79,191,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.arc(rpx, rpy, cellW * 1.6, 0, Math.PI*2); ctx.fill();
+
+        ctx.fillStyle = '#E94FBF';
+        ctx.beginPath(); ctx.arc(rpx, rpy, cellW * 0.55, 0, Math.PI*2); ctx.fill();
+
+        const hRad = robotHeading * Math.PI / 180;
+        ctx.strokeStyle = '#E94FBF';
+        ctx.lineWidth = 2.5;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(rpx, rpy);
+        ctx.lineTo(rpx + cellW*1.4*Math.sin(hRad), rpy - cellH*1.4*Math.cos(hRad));
+        ctx.stroke();
+    }
+
+    const tx = d.target_x, ty = d.target_y;
+    const tyFlip = GRID_SIZE - 1 - ty;
+    if (tx >= 0 && tx < GRID_SIZE && ty >= 0 && ty < GRID_SIZE && d.has_target) {
+        ctx.fillStyle = '#4FA3FF';
+        ctx.beginPath(); ctx.arc(tx*cellW + cellW/2, tyFlip*cellH + cellH/2, cellW*0.5, 0, Math.PI*2); ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(tx*cellW+3, tyFlip*cellH+cellH/2); ctx.lineTo((tx+1)*cellW-3, tyFlip*cellH+cellH/2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(tx*cellW+cellW/2, tyFlip*cellH+3); ctx.lineTo(tx*cellW+cellW/2, (tyFlip+1)*cellH-3); ctx.stroke();
+    } else if (d.has_target) {
+        const dx = d.target_wx - d.pos_x, dy = d.target_wy - d.pos_y;
+        const angle = Math.atan2(dx, dy);
+        const ex = Math.min(Math.max(GRID_SIZE/2 + Math.sin(angle)*GRID_SIZE/2, 0), GRID_SIZE-1);
+        const ey = GRID_SIZE - 1 - Math.min(Math.max(GRID_SIZE/2 + Math.cos(angle)*GRID_SIZE/2, 0), GRID_SIZE-1);
+        ctx.fillStyle = '#4FA3FF';
+        ctx.beginPath(); ctx.arc(ex*cellW+cellW/2, ey*cellH+cellH/2, 5, 0, Math.PI*2); ctx.fill();
+    }
+}
+
+// ============ COMMANDS ============
+function sendCmd(cmd) {
+    fetch('/api/control', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({cmd: cmd})
+    });
+}
+
+function toggleMode() {
+    const isAuto = document.getElementById('modeBtn').classList.contains('is-auto');
+    sendCmd(isAuto ? 'stop' : 'auto');
+}
+
+function setTarget() {
+    fetch('/api/target', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            x: parseFloat(document.getElementById('targetX').value) || 0,
+            y: parseFloat(document.getElementById('targetY').value) || 0
+        })
+    });
+}
+
+// ============ INPUT MODE TABS ============
+let inputMode = 'ai';
+document.querySelectorAll('.mode-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        inputMode = tab.dataset.imode;
+        const aiInput = document.getElementById('aiInput');
+        const coord = document.getElementById('coordFields');
+        if (inputMode === 'coord') {
+            aiInput.style.display = 'none';
+            coord.classList.add('active');
+        } else {
+            aiInput.style.display = '';
+            coord.classList.remove('active');
+        }
+    });
+});
+
+function submitInput() {
+    if (inputMode === 'coord') { setTarget(); return; }
+    const input = document.getElementById('aiInput');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    fetch('/api/ai/translate', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({text: text, user: getUsername()})
+    })
+    .then(r => { if (!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+    .then(data => { if (data.error) addAIBubble(data.error, 'error'); updateAIStatus(); })
+    .catch(err => addAIBubble('Error: ' + err.message, 'error'));
+}
+
+// ============ DRIVE PAD HANDLERS ============
+document.querySelectorAll('.drive-btn').forEach(btn => {
+    const cmd = btn.dataset.cmd;
+    const start = (e) => { e.preventDefault(); btn.classList.add('held'); sendCmd(cmd); };
+    const end   = (e) => { e.preventDefault(); btn.classList.remove('held'); sendCmd('stop'); };
+    btn.addEventListener('mousedown', start);
+    btn.addEventListener('mouseup', end);
+    btn.addEventListener('mouseleave', () => { if (btn.classList.contains('held')) end({preventDefault(){}}); });
+    btn.addEventListener('touchstart', start, {passive:false});
+    btn.addEventListener('touchend', end, {passive:false});
+    btn.addEventListener('touchcancel', end, {passive:false});
+});
+
+// ============ AI / CHAT ============
+function getUsername() { return document.getElementById('userName').value.trim() || 'Anonymous'; }
+
+function clearLogs() {
+    fetch('/api/debug/clear', {method:'POST', headers:{'Content-Type':'application/json'}});
+    document.getElementById('debugConsole').innerHTML = '<div class="log-line log-time">Cleared</div>';
+    debugLogIndex = 0;
+}
+
+function clearQueue() {
+    if (!confirm('Clear all queued commands?')) return;
+    fetch('/api/queue/clear', {method:'POST', headers:{'Content-Type':'application/json'}});
+}
+
+function setHeadingPrompt() {
+    const v = prompt('Set heading (0-359°). 0 = north.', '0');
+    if (v === null) return;
+    const deg = parseFloat(v);
+    if (isNaN(deg)) { alert('Not a number'); return; }
+    fetch('/api/heading_set', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({deg: deg})
+    });
+}
+
+function addAIBubble(text, type) {
+    const float = document.getElementById('chatFloat');
+    const bubble = document.createElement('div');
+    bubble.className = 'chat-bubble ' + type;
+    bubble.textContent = text;
+    float.appendChild(bubble);
+    while (float.children.length > 2) float.removeChild(float.firstChild);
+    setTimeout(() => bubble.classList.add('fading'), 5000);
+    setTimeout(() => bubble.remove(), 6000);
+}
+
+function updateAIStatus() {
+    fetch('/api/ai/status').then(r => r.json()).then(data => {
+        const status = document.getElementById('ollamaStatus');
+        if (status) status.textContent = data.ollama_available ? 'on' : 'off';
+        const badge = document.getElementById('aiQueueBadge');
+        badge.innerHTML = data.queue_length > 0 ? `<span class="ai-queue-badge">${data.queue_length}</span>` : '';
+    }).catch(() => {});
+}
+
+// ============ VOICE ============
+let recognition = null;
+let isListening = false;
+
+function toggleVoice() {
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+        addAIBubble('Voice not supported here.', 'error');
+        return;
+    }
+    if (isListening) { stopVoice(); return; }
+
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognition = new SR();
+    recognition.lang = document.getElementById('voiceLang').value;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 3;
+    recognition.continuous = false;
+
+    recognition.onstart = () => {
+        isListening = true;
+        document.getElementById('voiceBtn').classList.add('listening');
+        document.getElementById('aiInput').placeholder = 'Listening...';
+    };
+
+    recognition.onresult = (event) => {
+        let text = event.results[0][0].transcript;
+        const confidence = (event.results[0][0].confidence * 100).toFixed(0);
+        const lang = document.getElementById('voiceLang').value;
+        if (lang === 'th-TH') {
+            const thaiMap = {
+                'ไปข้างหน้า':'go forward','ข้างหน้า':'forward','หน้า':'forward',
+                'ถอยหลัง':'go backward','ข้างหลัง':'backward','หลัง':'backward',
+                'ซ้าย':'left','ไปซ้าย':'go left','ขวา':'right','ไปขวา':'go right',
+                'เหนือ':'north','ใต้':'south','ตะวันออก':'east','ตะวันตก':'west',
+                'เมตร':'meters','เซนติเมตร':'cm','ซม':'cm',
+                'หยุด':'stop','กลับบ้าน':'come back','กลับ':'come back','รีเซ็ต':'reset',
+                'หนึ่ง':'1','สอง':'2','สาม':'3','สี่':'4','ห้า':'5',
+                'หก':'6','เจ็ด':'7','แปด':'8','เก้า':'9','สิบ':'10',
+            };
+            let translated = text;
+            for (const [th, en] of Object.entries(thaiMap)) translated = translated.replace(new RegExp(th, 'g'), en);
+            if (translated !== text) { addAIBubble('[TH] ' + text, 'user'); text = translated; }
+        }
+        document.getElementById('aiInput').value = text;
+        addAIBubble('[V ' + confidence + '%] ' + text, 'user');
+        fetch('/api/ai/translate', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({text: text, user: getUsername() + ' (voice)'})
+        }).then(r => { if (!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+          .then(data => {
+              if (data.error) addAIBubble(data.error, 'error');
+              else addAIBubble(data.explanation, 'ai');
+              updateAIStatus();
+          })
+          .catch(err => addAIBubble('Error: ' + err.message, 'error'));
+    };
+
+    recognition.onerror = (e) => { if (e.error !== 'aborted') addAIBubble('V: ' + e.error, 'error'); stopVoice(); };
+    recognition.onend = () => stopVoice();
+    recognition.start();
+}
+
+function stopVoice() {
+    isListening = false;
+    document.getElementById('voiceBtn').classList.remove('listening');
+    document.getElementById('aiInput').placeholder = 'Tell the robot...';
+    if (recognition) { try { recognition.stop(); } catch(e) {} }
+}
+
+// ============ SCROLL-EDGE FADE TOGGLE ============
+// Hide the bottom fade-mask once the user reaches (or passes) the end of the debug view.
+(function attachScrollEdge() {
+    const view = document.querySelector('.debug-view');
+    if (!view) return;
+    const update = () => {
+        const atBottom = view.scrollHeight - view.scrollTop - view.clientHeight < 6;
+        view.classList.toggle('at-bottom', atBottom);
+        // Also clear the fade when content fits without scrolling at all.
+        if (view.scrollHeight <= view.clientHeight + 1) view.classList.add('at-bottom');
+        else if (view.scrollTop > 0 && !atBottom) view.classList.remove('at-bottom');
+    };
+    view.addEventListener('scroll', update, {passive: true});
+    // Re-check whenever debug mode is entered (content height changes).
+    new MutationObserver(() => requestAnimationFrame(update)).observe(document.body, {attributes:true, attributeFilter:['class']});
+    update();
+})();
+
+// ============ TAP RIPPLE (visible feedback for one-shot debug buttons) ============
+document.querySelectorAll('.test-btn, .dbg-mini').forEach(btn => {
+    btn.addEventListener('click', () => {
+        btn.classList.remove('tapped');         // restart animation if double-tapped fast
+        // force reflow so removing+adding within same frame still re-triggers the animation
+        void btn.offsetWidth;
+        btn.classList.add('tapped');
+        setTimeout(() => btn.classList.remove('tapped'), 460);
+    });
+});
+
+// ============ DEBUG TOGGLE (with morph) ============
+function toggleDebug() {
+    const apply = () => {
+        document.body.classList.add('toggling');
+        document.body.classList.toggle('debug');
+        document.getElementById('dbgToggle').classList.toggle('active');
+    };
+    if (document.startViewTransition) {
+        document.startViewTransition(apply).finished.finally(() => {
+            document.body.classList.remove('toggling');
+        });
+    } else {
+        apply();
+        setTimeout(() => document.body.classList.remove('toggling'), 700);
+    }
+}
+
+// ============ KICK OFF ============
+let currentPollRate = 500;
+let pollTimer = setInterval(fetchDashboard, currentPollRate);
+setInterval(updateAIStatus, 5000);
+fetchDashboard();
+updateAIStatus();
+</script>
+</body>
+</html>

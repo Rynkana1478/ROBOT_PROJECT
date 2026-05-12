@@ -6,6 +6,7 @@ Auto   = queued targets/commands with id-based ack.
 """
 
 import os
+import re
 import json
 import time
 import math
@@ -113,9 +114,25 @@ def _enqueue(cmd_dict):
 # ============================================
 # Dashboard
 # ============================================
+_MOBILE_UA_RE = re.compile(
+    r"(android|iphone|ipod|ipad|mobile|blackberry|opera mini|iemobile|webos)",
+    re.IGNORECASE,
+)
+
+def _is_mobile_request():
+    """Pick the mobile template if the User-Agent looks like a phone, or
+    if ?view=mobile|desktop overrides it."""
+    view = request.args.get("view", "").lower()
+    if view in ("desktop", "mobile"):
+        return view == "mobile"
+    ua = request.headers.get("User-Agent", "")
+    return bool(_MOBILE_UA_RE.search(ua))
+
+
 @app.route("/")
 def dashboard():
-    return render_template("dashboard.html", grid_size=GRID_SIZE,
+    template = "dashboard_mobile.html" if _is_mobile_request() else "dashboard_desktop.html"
+    return render_template(template, grid_size=GRID_SIZE,
                            lan_ips=_lan_ips(), server_port=PORT)
 
 
@@ -405,6 +422,10 @@ def ai_translate_endpoint():
             cid = _enqueue({"type": "move_relative",
                             "x": float(cmd.get("right", 0)),
                             "y": float(cmd.get("forward", 0))})
+            enqueued_ids.append(cid)
+        elif action == "turn_relative":
+            cid = _enqueue({"type": "turn_relative",
+                            "heading": float(cmd.get("degrees", 0))})
             enqueued_ids.append(cid)
         elif action == "backtrack":
             cid = _enqueue({"type": "backtrack"})

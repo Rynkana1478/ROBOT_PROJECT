@@ -38,6 +38,11 @@ public:
     float distNearRight = 999;
     float sweepDist[SWEEP_STEPS];
 
+    // Spurious-999 filter state. Reject "no echo" if recent reading was close.
+    unsigned long lastValidFrontMs = 0;
+    static constexpr float FRONT_999_REJECT_BELOW_CM = 80.0f;  // close enough to brake-relevant
+    static constexpr unsigned long FRONT_999_HOLD_MS = 250;    // ~2-3 sensor cycles
+
     float heading    = 0;
     float headingRad = 0;
     float gyroRate   = 0;
@@ -93,7 +98,21 @@ public:
 
         memcpy(sweepDist, tempDist, sizeof(sweepDist));
 
-        distFront     = tempDist[2];
+        // Spurious-999 filter for distFront: a 999 immediately after a close
+        // reading is almost always a missed echo (vibration tilts the sensor,
+        // echo misses the receiver). Reject for up to FRONT_999_HOLD_MS so
+        // the brake doesn't unfire on a phantom "path clear" reading. After
+        // the hold expires we accept 999 — it really is far.
+        float frontRaw = tempDist[2];
+        unsigned long now = millis();
+        if (frontRaw >= 999.0f && distFront < FRONT_999_REJECT_BELOW_CM &&
+            now - lastValidFrontMs < FRONT_999_HOLD_MS) {
+            // keep previous distFront — don't update
+        } else {
+            distFront = frontRaw;
+            if (frontRaw < 999.0f) lastValidFrontMs = now;
+        }
+
         distNearRight = tempDist[1];
         distNearLeft  = tempDist[3];
         distRight     = min(tempDist[0], tempDist[1]);

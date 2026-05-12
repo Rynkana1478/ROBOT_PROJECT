@@ -48,9 +48,14 @@
 // SWEEP_NORMAL) plus brake coast at SPEED_SLOW means we need ~10-15 cm of
 // runway between trigger and contact. Raised 15 -> 20 -> 25 progressively as
 // real-world bumping showed momentum was beating the brake.
-#define OBSTACLE_CLOSE  25
-#define OBSTACLE_SLOW   30
-#define OBSTACLE_CLEAR  40
+#define OBSTACLE_CLOSE     25
+#define OBSTACLE_SLOW      30
+#define OBSTACLE_CLEAR     40
+// Approach slowdown: drop from SPEED_CRUISE to SPEED_SLOW when distFront
+// crosses this, so the brake has less momentum to dump when it triggers
+// at OBSTACLE_SLOW. Without this, the chassis hits the brake at full cruise
+// and momentum carries it past the 30cm trigger before the brake takes hold.
+#define OBSTACLE_SLOWDOWN  60
 
 // --- Motor Speeds (0-1023, 10-bit) ---
 #define SPEED_STOP    0
@@ -147,11 +152,18 @@ static const int SWEEP_ANGLES[SWEEP_STEPS] = {20, 55, 90, 125, 160};
 #define AVOID_BYPASS_SPEED          400    // PWM during AV_DRIVE_PAST
 #define AVOID_TURN_INCREMENT_DEG    30.0   // each turn step
 #define AVOID_MAX_INCREMENTS        4      // hard cap on cumulative turn
-#define AVOID_DRIVE_PAST_CM         50.0   // forward travel after front clears
+#define AVOID_DRIVE_PAST_CM         30.0   // forward travel after front clears
                                            // 50 cm at 30° turn = 25 cm lateral
                                            // offset, enough to clear obstacles
                                            // wider than chassis half-width.
 #define AVOID_CHECK_SETTLE_MS       400    // wait for fresh sweep before recheck
+
+// AV_DRIVE_PAST watches the near-side sensor on the side the chassis turned
+// AWAY from (where the trailing wall sits). Near-side beam is at 35° off-
+// center, so a reading of D cm puts the wall ~D*sin(35°) ≈ D*0.57 cm
+// laterally. 22 cm reading ≈ 12 cm lateral, which is chassis half-width
+// (~9 cm) + 3 cm margin. Brake + re-evaluate if near-side drops below this.
+#define AVOID_SIDE_CLEAR_CM         22.0
 
 // Smooth-turn profile: proportional speed ramps from MIN at tolerance edge
 // up to SPEED_TURN at FULL_DEG. STOP_TIME_MS models brake deceleration so
@@ -185,9 +197,14 @@ static const int SWEEP_ANGLES[SWEEP_STEPS] = {20, 55, 90, 125, 160};
 #define TELEMETRY_INTERVAL_MS    100   // include telemetry every Nth sync
 #define HTTP_TIMEOUT_MS          1500  // LAN+Flask round-trips can spike to ~1s
 
-// Deadman: no sync for this long → safety stop
-#define MANUAL_DEADMAN_MS        300   // manual mode: drop to stop fast
-#define AUTO_DEADMAN_MS          3000  // auto mode: longer grace period
+// Deadman: WiFi-link based, not HTTP latency. Avoidance runs locally on the
+// ESP32 so a slow server / laggy internet must NOT kill in-progress avoid.
+// We halt only when the WiFi link itself has been down for this long.
+#define WIFI_DEADMAN_MS          4000  // halt if WiFi disconnected this long
+// Legacy HTTP-latency knobs kept for any code that still reads them; the
+// brain loop no longer uses them.
+#define MANUAL_DEADMAN_MS        300
+#define AUTO_DEADMAN_MS          3000
 
 // --- Debug ---
 #define DEBUG_MODE    1
