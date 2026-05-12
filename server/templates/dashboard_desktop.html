@@ -112,6 +112,29 @@
         .dbg-toggle:hover { color: var(--highlight); border-color: var(--highlight); }
         .dbg-toggle.active { background: var(--highlight); color: #fff; border-color: var(--highlight); }
 
+        /* ============ TOP-LEFT FLR STATUS (desktop only) ============ */
+        .flr-status {
+            position: fixed;
+            top: 48px; left: 16px;
+            z-index: 45;
+            display: flex; flex-direction: column; gap: 4px;
+            font-size: 0.74em;
+            font-variant-numeric: tabular-nums;
+            padding: 8px 10px;
+            background: rgba(14,14,18,0.55);
+            backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--panel-bd);
+            border-radius: 12px;
+            min-width: 110px;
+        }
+        .flr-row { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+        .flr-lab { color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.86em; }
+        .flr-val { font-weight: 600; }
+        .flr-val.warn   { color: var(--warn); }
+        .flr-val.danger { color: var(--danger); }
+        .flr-val.ok     { color: var(--ok); }
+        body.debug .flr-status { display: none; }
+
         /* ============ STATUS SLIDESHOW ============ */
         .status-slides {
             position: fixed; top: 48px; left: 50%;
@@ -339,6 +362,11 @@
             font-variant-numeric: tabular-nums;
         }
         .coord-fields input:focus { border-color: var(--accent-2); }
+        .coord-fields input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+        .coord-fields input[type=number]::-webkit-inner-spin-button,
+        .coord-fields input[type=number]::-webkit-outer-spin-button {
+            -webkit-appearance: none; margin: 0;
+        }
         .coord-fields .lab { color: var(--muted); font-size: 0.72em; font-weight: 500; }
 
         .icon-btn {
@@ -558,6 +586,13 @@
             <button id="dbgToggle" class="dbg-toggle" onclick="toggleDebug()">debug</button>
             <div id="connStatus" class="pill conn-pill"><span class="conn-dot"></span><span id="connText">Offline</span></div>
         </div>
+    </div>
+
+    <!-- ============ TOP-LEFT F/L/R STATUS (desktop only, hidden in debug) -->
+    <div class="flr-status" id="flrStatus">
+        <div class="flr-row"><span class="flr-lab">front</span><span class="flr-val" id="flrFront">--</span></div>
+        <div class="flr-row"><span class="flr-lab">left</span><span class="flr-val" id="flrLeft">--</span></div>
+        <div class="flr-row"><span class="flr-lab">right</span><span class="flr-val" id="flrRight">--</span></div>
     </div>
 
     <!-- ============ PLAY VIEW (gamepad) ============ -->
@@ -858,6 +893,11 @@ function updateDashboard(d) {
     setDist('distNearLeft', d.near_left || 999);
     setDist('distNearRight', d.near_right || 999);
 
+    // Top-left F/L/R always-on status (desktop only)
+    setFlr('flrFront', d.front);
+    setFlr('flrLeft',  d.left);
+    setFlr('flrRight', d.right);
+
     // Slideshow values
     const fEl = document.getElementById('slideFront');
     fEl.textContent = (d.front > 400 ? '> 400' : d.front.toFixed(0)) + ' cm';
@@ -952,6 +992,13 @@ function setDist(id, val) {
     el.className = 'val ' + (val < 15 ? 'dist-danger' : val < 30 ? 'dist-warn' : 'dist-ok');
 }
 
+function setFlr(id, val) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = (val > 400 ? '>400' : val.toFixed(0)) + ' cm';
+    el.className = 'flr-val ' + (val < 15 ? 'danger' : val < 30 ? 'warn' : 'ok');
+}
+
 function setDisconnected() {
     document.getElementById('connStatus').classList.remove('online');
     document.getElementById('connText').textContent = 'Error';
@@ -986,6 +1033,15 @@ function drawGrid(d, robotX, robotY, robotHeading) {
     ctx.fillStyle = '#16161D';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+    // Keep chassis pinned to canvas center: shift the world by (ox, oy)
+    // so the cell containing the robot lands on the canvas centre.
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    const robotCanvasX = robotX * cellW + cellW/2;
+    const robotCanvasY = (GRID_SIZE - 1 - robotY) * cellH + cellH/2;
+    const ox = cx - robotCanvasX;
+    const oy = cy - robotCanvasY;
+
     if (gridCells) {
         const cellColors = [
             'rgba(107,91,255,0.12)',  // free (subtle purple)
@@ -999,58 +1055,68 @@ function drawGrid(d, robotX, robotY, robotHeading) {
             const x = i % GRID_SIZE;
             const y = GRID_SIZE - 1 - Math.floor(i / GRID_SIZE);
             ctx.fillStyle = c;
-            ctx.fillRect(x * cellW, y * cellH, cellW, cellH);
+            ctx.fillRect(x * cellW + ox, y * cellH + oy, cellW, cellH);
         }
     }
 
+    // Grid lines: draw across full canvas with phase-aligned spacing
+    // so the lattice stays continuous as the world slides.
     ctx.strokeStyle = 'rgba(255,255,255,0.05)';
     ctx.lineWidth = 0.5;
-    for (let i = 0; i <= GRID_SIZE; i++) {
-        ctx.beginPath(); ctx.moveTo(i*cellW, 0); ctx.lineTo(i*cellW, canvas.height); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(0, i*cellH); ctx.lineTo(canvas.width, i*cellH); ctx.stroke();
+    const phaseX = ((ox % cellW) + cellW) % cellW;
+    const phaseY = ((oy % cellH) + cellH) % cellH;
+    for (let x = phaseX; x <= canvas.width + 0.5; x += cellW) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+    }
+    for (let y = phaseY; y <= canvas.height + 0.5; y += cellH) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
     }
 
-    // Robot
-    const rpx = robotX * cellW + cellW/2;
-    const rpy = (GRID_SIZE - 1 - robotY) * cellH + cellH/2;
-    if (robotX >= -1 && robotX <= GRID_SIZE && robotY >= -1 && robotY <= GRID_SIZE) {
+    // Robot — always at canvas centre
+    {
         // Glow
-        const grad = ctx.createRadialGradient(rpx, rpy, 0, rpx, rpy, cellW * 1.6);
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, cellW * 1.6);
         grad.addColorStop(0, 'rgba(233,79,191,0.5)');
         grad.addColorStop(1, 'rgba(233,79,191,0)');
         ctx.fillStyle = grad;
-        ctx.beginPath(); ctx.arc(rpx, rpy, cellW * 1.6, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cx, cy, cellW * 1.6, 0, Math.PI*2); ctx.fill();
 
         ctx.fillStyle = '#E94FBF';
-        ctx.beginPath(); ctx.arc(rpx, rpy, cellW * 0.55, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cx, cy, cellW * 0.55, 0, Math.PI*2); ctx.fill();
 
         const hRad = robotHeading * Math.PI / 180;
         ctx.strokeStyle = '#E94FBF';
         ctx.lineWidth = 2.5;
         ctx.lineCap = 'round';
         ctx.beginPath();
-        ctx.moveTo(rpx, rpy);
-        ctx.lineTo(rpx + cellW*1.4*Math.sin(hRad), rpy - cellH*1.4*Math.cos(hRad));
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + cellW*1.4*Math.sin(hRad), cy - cellH*1.4*Math.cos(hRad));
         ctx.stroke();
     }
 
-    // Target
+    // Target — shifted by the same (ox, oy)
     const tx = d.target_x, ty = d.target_y;
     const tyFlip = GRID_SIZE - 1 - ty;
-    if (tx >= 0 && tx < GRID_SIZE && ty >= 0 && ty < GRID_SIZE && d.has_target) {
+    const tCx = tx*cellW + cellW/2 + ox;
+    const tCy = tyFlip*cellH + cellH/2 + oy;
+    if (tx >= 0 && tx < GRID_SIZE && ty >= 0 && ty < GRID_SIZE && d.has_target
+        && tCx >= -cellW && tCx <= canvas.width + cellW
+        && tCy >= -cellH && tCy <= canvas.height + cellH) {
         ctx.fillStyle = '#4FA3FF';
-        ctx.beginPath(); ctx.arc(tx*cellW + cellW/2, tyFlip*cellH + cellH/2, cellW*0.5, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(tCx, tCy, cellW*0.5, 0, Math.PI*2); ctx.fill();
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.moveTo(tx*cellW+3, tyFlip*cellH+cellH/2); ctx.lineTo((tx+1)*cellW-3, tyFlip*cellH+cellH/2); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(tx*cellW+cellW/2, tyFlip*cellH+3); ctx.lineTo(tx*cellW+cellW/2, (tyFlip+1)*cellH-3); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(tCx - cellW/2 + 3, tCy); ctx.lineTo(tCx + cellW/2 - 3, tCy); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(tCx, tCy - cellH/2 + 3); ctx.lineTo(tCx, tCy + cellH/2 - 3); ctx.stroke();
     } else if (d.has_target) {
+        // Off-screen: edge indicator pointing toward the world target
         const dx = d.target_wx - d.pos_x, dy = d.target_wy - d.pos_y;
         const angle = Math.atan2(dx, dy);
-        const ex = Math.min(Math.max(GRID_SIZE/2 + Math.sin(angle)*GRID_SIZE/2, 0), GRID_SIZE-1);
-        const ey = GRID_SIZE - 1 - Math.min(Math.max(GRID_SIZE/2 + Math.cos(angle)*GRID_SIZE/2, 0), GRID_SIZE-1);
+        const r = Math.min(canvas.width, canvas.height) * 0.45;
+        const ex = cx + Math.sin(angle) * r;
+        const ey = cy - Math.cos(angle) * r;
         ctx.fillStyle = '#4FA3FF';
-        ctx.beginPath(); ctx.arc(ex*cellW+cellW/2, ey*cellH+cellH/2, 5, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(ex, ey, 5, 0, Math.PI*2); ctx.fill();
     }
 }
 

@@ -18,3 +18,11 @@ PORT = 25565
 # Leave as empty strings to hide the line.
 DDNS_HOST = ""        # e.g. "myrobot.example.com"
 DDNS_PORT = ""        # e.g. "12345"
+
+# Google AI Studio key for the chat translator.
+# Get one free at https://aistudio.google.com/apikey.
+# Leave empty to disable the LLM and use rule-based parsing only.
+GOOGLE_AI_API_KEY = ""
+# Any model the key has access to. Defaults to gemini-2.5-flash
+# (fast, generous free tier). Swap to "gemma-3-27b-it" if you prefer Gemma.
+GOOGLE_AI_MODEL = "gemini-2.5-flash"

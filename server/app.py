@@ -13,7 +13,7 @@ import math
 import threading
 from collections import deque
 from flask import Flask, render_template, request, jsonify
-from ai_translator import translate as ai_translate, check_ollama
+from ai_translator import translate as ai_translate, check_ai
 
 app = Flask(__name__)
 
@@ -32,8 +32,39 @@ except ImportError:
 # --- Chassis tracking ---
 chassis_info = {"id": None, "last_seen": 0}
 
+# --- Disk logging ----------------------------------------------------
+# Server keeps a rolling in-memory buffer for the dashboard, AND tees each
+# entry to a file under logs/ so history survives a restart.
+LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+_log_lock = threading.Lock()
+
+def _append_log(filename, line):
+    try:
+        with _log_lock:
+            with open(os.path.join(LOG_DIR, filename), "a", encoding="utf-8") as f:
+                f.write(line.rstrip("\n") + "\n")
+    except Exception:
+        pass  # never let disk failure crash a request
+
+class TeedDeque(deque):
+    """deque that also appends each item to a file. Items can be str or dict;
+    dicts are serialized as JSON lines."""
+    def __init__(self, maxlen, filename):
+        super().__init__(maxlen=maxlen)
+        self._filename = filename
+    def append(self, item):
+        super().append(item)
+        if isinstance(item, dict):
+            try:
+                _append_log(self._filename, json.dumps(item, ensure_ascii=False))
+            except Exception:
+                pass
+        else:
+            _append_log(self._filename, str(item))
+
 # --- Debug log buffer ---
-debug_logs = deque(maxlen=200)
+debug_logs = TeedDeque(maxlen=200, filename="debug.log")
 
 # --- Robot state (latest telemetry from sync) ---
 robot_state = {
@@ -84,8 +115,8 @@ heading_override_pending = None  # float or None
 
 # ----- AI history -----
 ai_command_queue = deque()  # legacy AI multi-step (kept for compat)
-ai_log = deque(maxlen=50)
-chat_log = deque(maxlen=100)
+ai_log = TeedDeque(maxlen=50, filename="ai.jsonl")
+chat_log = TeedDeque(maxlen=100, filename="chat.jsonl")
 
 # ----- Request dedupe (prevents double-clicks / accidental re-submits from
 #       generating duplicate state changes or duplicate queue entries) -----
@@ -450,8 +481,11 @@ def ai_translate_endpoint():
 
 @app.route("/api/ai/status", methods=["GET"])
 def ai_status():
+    ai_ok = check_ai()
     return jsonify({
-        "ollama_available": check_ollama(),
+        "ai_available": ai_ok,
+        # Legacy alias for older dashboard JS.
+        "ollama_available": ai_ok,
         "queue_length": len(master_queue),
         "history": list(ai_log),
     })

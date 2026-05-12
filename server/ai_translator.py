@@ -1,17 +1,23 @@
 """
 AI Command Translator
-Converts natural language → robot commands using Ollama (local LLM).
-Falls back to rule-based parsing if Ollama is not running.
+Converts natural language → robot commands using Google AI (Gemini/Gemma).
+Falls back to rule-based parsing if the API key is missing or the request fails.
 """
 
 import json
 import math
+import os
 import re
 import requests
 import time
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
-OLLAMA_MODEL = "llama3.2"
+try:
+    from config_local import GOOGLE_AI_API_KEY, GOOGLE_AI_MODEL
+except ImportError:
+    GOOGLE_AI_API_KEY = os.environ.get("GOOGLE_AI_API_KEY", "")
+    GOOGLE_AI_MODEL   = os.environ.get("GOOGLE_AI_MODEL", "gemini-2.5-flash")
+
+GOOGLE_AI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 SYSTEM_PROMPT = """You translate human instructions into JSON robot commands. Output ONLY valid JSON.
 
@@ -113,34 +119,76 @@ Output: {"commands": [{"action": "move_relative", "forward": 100, "right": 0}, {
 """
 
 
-def check_ollama():
-    """Check if Ollama is running."""
+def check_ai():
+    """Cheap check — just verify the key is configured. We don't ping Google
+    on every dashboard poll because that burns quota and adds latency."""
+    return bool(GOOGLE_AI_API_KEY)
+
+
+# Backwards-compat alias for older imports.
+check_ollama = check_ai
+
+
+def _gemma_payload(user_input):
+    """Gemma chat endpoint rejects systemInstruction; fold the system prompt
+    into the user turn instead."""
+    return {
+        "contents": [{
+            "role": "user",
+            "parts": [{"text": f"{SYSTEM_PROMPT}\n\nInput: {user_input}\nOutput:"}],
+        }],
+        "generationConfig": {
+            "temperature": 0.1,
+            "responseMimeType": "application/json",
+        },
+    }
+
+
+def _gemini_payload(user_input):
+    return {
+        "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+        "contents": [{"role": "user", "parts": [{"text": user_input}]}],
+        "generationConfig": {
+            "temperature": 0.1,
+            "responseMimeType": "application/json",
+        },
+    }
+
+
+def ask_ai(user_input):
+    """Send text to Google AI (Gemini or Gemma), get parsed JSON dict."""
+    if not GOOGLE_AI_API_KEY:
+        return {"error": "no API key configured"}
+
+    url = f"{GOOGLE_AI_BASE}/{GOOGLE_AI_MODEL}:generateContent?key={GOOGLE_AI_API_KEY}"
+    body = (_gemma_payload(user_input)
+            if GOOGLE_AI_MODEL.lower().startswith("gemma")
+            else _gemini_payload(user_input))
+
     try:
-        r = requests.get("http://localhost:11434/api/tags", timeout=0.5)
-        return r.status_code == 200
-    except:
-        return False
+        r = requests.post(url, json=body, timeout=15)
+        if r.status_code != 200:
+            return {"error": f"HTTP {r.status_code}: {r.text[:200]}"}
 
+        data = r.json()
+        candidates = data.get("candidates") or []
+        if not candidates:
+            return {"error": f"no candidates: {data.get('promptFeedback', {})}"}
 
-def ask_ollama(user_input):
-    """Send text to Ollama, get JSON response."""
-    try:
-        r = requests.post(OLLAMA_URL, json={
-            "model": OLLAMA_MODEL,
-            "prompt": user_input,
-            "system": SYSTEM_PROMPT,
-            "stream": False,
-            "format": "json",
-            "options": {"temperature": 0.1}  # Low temp = more deterministic
-        }, timeout=60)  # First call loads model into RAM (~30s), subsequent calls are fast
+        parts = candidates[0].get("content", {}).get("parts") or []
+        text = "".join(p.get("text", "") for p in parts).strip()
+        if not text:
+            return {"error": "empty model output"}
 
-        if r.status_code == 200:
-            response_text = r.json().get("response", "")
-            return json.loads(response_text)
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        return {"error": f"bad JSON from model: {e}"}
     except Exception as e:
         return {"error": str(e)}
 
-    return {"error": "Ollama request failed"}
+
+# Backwards-compat alias.
+ask_ollama = ask_ai
 
 
 def rule_based_parse(text):
@@ -287,7 +335,7 @@ def rule_based_parse(text):
 def translate(user_input):
     """
     Main entry: translate natural language to robot commands.
-    Uses Ollama if available, falls back to rule-based.
+    Uses Google AI (Gemini/Gemma) if a key is configured, falls back to rule-based.
     Returns dict with: commands, explanation, method, debug info.
     """
     start_time = time.time()
@@ -295,12 +343,15 @@ def translate(user_input):
         "input": user_input,
         "timestamp": time.strftime("%H:%M:%S"),
         "method": "unknown",
-        "ollama_available": False,
+        "ai_available": check_ai(),
+        "model": GOOGLE_AI_MODEL if check_ai() else "",
         "commands": [],
         "explanation": "",
         "error": None,
         "duration_ms": 0,
     }
+    # Keep the legacy key for dashboards that still read it.
+    result["ollama_available"] = result["ai_available"]
 
     # Check priority commands first (instant, no AI)
     priority = rule_based_parse(user_input)
@@ -311,12 +362,11 @@ def translate(user_input):
         result["duration_ms"] = round((time.time() - start_time) * 1000)
         return result
 
-    # Try Ollama
-    if check_ollama():
-        result["ollama_available"] = True
-        result["method"] = "ollama"
+    # Try Google AI
+    if check_ai():
+        result["method"] = f"google-ai ({GOOGLE_AI_MODEL})"
 
-        ai_response = ask_ollama(user_input)
+        ai_response = ask_ai(user_input)
 
         if "error" not in ai_response:
             commands = ai_response.get("commands", [])
@@ -336,8 +386,8 @@ def translate(user_input):
                 # else: skip unknown action
 
             if validated:
-                # Post-validate: check if Ollama did diagonal math wrong
-                # If user said diagonal but only one axis has a value, fix it
+                # Post-validate: check if the model did diagonal math wrong.
+                # If user said diagonal but only one axis has a value, fix it.
                 input_lower = user_input.lower()
                 diag_dirs = {
                     "northeast": (1, 1), "northwest": (-1, 1),
@@ -348,7 +398,6 @@ def translate(user_input):
                         for cmd in validated:
                             if cmd.get("action") == "set_target":
                                 x, y = cmd.get("x", 0), cmd.get("y", 0)
-                                # If one axis is 0 but shouldn't be, fix diagonal
                                 if (x == 0 and y != 0) or (y == 0 and x != 0):
                                     dist = abs(x) if x != 0 else abs(y)
                                     cmd["x"] = round(sx * dist * 0.707)
@@ -360,23 +409,20 @@ def translate(user_input):
                 result["explanation"] = ai_response.get("explanation", "")
                 result["raw_response"] = ai_response
             else:
-                # Ollama returned garbage, fall back to rules
-                result["method"] = "rule (ollama output invalid)"
+                result["method"] = "rule (ai output invalid)"
                 fallback = rule_based_parse(user_input)
                 result["commands"] = fallback.get("commands", [])
                 result["explanation"] = fallback.get("explanation", "")
                 result["error"] = fallback.get("error")
         else:
-            # Ollama failed, fall back to rules
-            result["method"] = "rule (ollama error)"
-            result["ollama_error"] = ai_response["error"]
+            result["method"] = "rule (ai error)"
+            result["ai_error"] = ai_response["error"]
             fallback = rule_based_parse(user_input)
             result["commands"] = fallback.get("commands", [])
             result["explanation"] = fallback.get("explanation", "")
             result["error"] = fallback.get("error")
     else:
-        # No Ollama, use rules
-        result["method"] = "rule (ollama offline)"
+        result["method"] = "rule (no api key)"
         fallback = rule_based_parse(user_input)
         result["commands"] = fallback.get("commands", [])
         result["explanation"] = fallback.get("explanation", "")

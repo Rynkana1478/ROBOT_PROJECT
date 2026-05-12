@@ -335,6 +335,11 @@
             text-align: center;
             font-variant-numeric: tabular-nums;
         }
+        .coord-fields input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+        .coord-fields input[type=number]::-webkit-inner-spin-button,
+        .coord-fields input[type=number]::-webkit-outer-spin-button {
+            -webkit-appearance: none; margin: 0;
+        }
         .coord-fields .lab { color: var(--muted); font-size: 0.66em; font-weight: 500; }
 
         .icon-btn {
