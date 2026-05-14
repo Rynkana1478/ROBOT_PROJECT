@@ -19,10 +19,19 @@ PORT = 25565
 DDNS_HOST = ""        # e.g. "myrobot.example.com"
 DDNS_PORT = ""        # e.g. "12345"
 
-# Google AI Studio key for the chat translator.
-# Get one free at https://aistudio.google.com/apikey.
-# Leave empty to disable the LLM and use rule-based parsing only.
+# ---- AI translator backend ---------------------------------------------------
+# "ollama" = local Ollama daemon (no rate limits, runs offline, needs GPU/RAM).
+# "google" = Gemini / Gemma via Google AI Studio (great quality but daily quota).
+AI_BACKEND = "ollama"
+
+# Ollama config (used when AI_BACKEND = "ollama").
+# Pull a model first:  ollama pull qwen2.5:7b
+# Good picks: qwen2.5:7b (strong Thai), llama3.2 (English-only, faster).
+OLLAMA_URL   = "http://localhost:11434"
+OLLAMA_MODEL = "qwen2.5:7b"
+
+# Google AI config (used when AI_BACKEND = "google").
+# Get a free key at https://aistudio.google.com/apikey.
+# Leave GOOGLE_AI_API_KEY empty to disable the cloud path entirely.
 GOOGLE_AI_API_KEY = ""
-# Any model the key has access to. Defaults to gemini-2.5-flash
-# (fast, generous free tier). Swap to "gemma-3-27b-it" if you prefer Gemma.
-GOOGLE_AI_MODEL = "gemini-2.5-flash"
+GOOGLE_AI_MODEL   = "gemini-2.5-flash"

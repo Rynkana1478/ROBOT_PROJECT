@@ -383,21 +383,6 @@
         }
         .icon-btn:hover { box-shadow: 0 0 18px var(--accent-1); }
         .icon-btn:active { transform: scale(0.92); }
-        .icon-btn.mic {
-            background: rgba(255,255,255,0.06);
-            border: 1px solid var(--panel-bd);
-            color: var(--muted);
-        }
-        .icon-btn.mic:hover { color: var(--highlight); border-color: var(--highlight); }
-        .icon-btn.mic.listening {
-            background: var(--highlight); color: #fff; border-color: var(--highlight);
-            animation: micPulse 1s infinite;
-        }
-        @keyframes micPulse {
-            0%,100% { box-shadow: 0 0 0 0 rgba(233,79,191,0.5); }
-            50%     { box-shadow: 0 0 0 8px rgba(233,79,191,0); }
-        }
-
         .ai-queue-badge {
             display: inline-block;
             background: var(--highlight); color: #fff;
@@ -658,7 +643,6 @@
                     <span class="lab">X</span><input type="number" id="targetX" value="0" step="10">
                     <span class="lab">Y</span><input type="number" id="targetY" value="100" step="10">
                 </div>
-                <button class="icon-btn mic" id="voiceBtn" onclick="toggleVoice()" title="Voice">&#127908;</button>
                 <button class="icon-btn" onclick="submitInput()" title="Send">&#10148;</button>
                 <span id="aiQueueBadge"></span>
             </div>
@@ -666,10 +650,6 @@
 
         <!-- Hidden but JS-referenced -->
         <input type="hidden" id="userName" value="Anonymous">
-        <select id="voiceLang" style="display:none">
-            <option value="en-US" selected>EN</option>
-            <option value="th-TH">TH</option>
-        </select>
     </div>
 
     <!-- ============ DEBUG VIEW ============ -->
@@ -1281,75 +1261,6 @@ function updateAIStatus() {
         const badge = document.getElementById('aiQueueBadge');
         badge.innerHTML = data.queue_length > 0 ? `<span class="ai-queue-badge">${data.queue_length}</span>` : '';
     }).catch(() => {});
-}
-
-// ============ VOICE ============
-let recognition = null;
-let isListening = false;
-
-function toggleVoice() {
-    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-        addAIBubble('Voice not supported. Use Chrome or Edge.', 'error');
-        return;
-    }
-    if (isListening) { stopVoice(); return; }
-
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    recognition = new SR();
-    recognition.lang = document.getElementById('voiceLang').value;
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 3;
-    recognition.continuous = false;
-
-    recognition.onstart = () => {
-        isListening = true;
-        document.getElementById('voiceBtn').classList.add('listening');
-        document.getElementById('aiInput').placeholder = 'Listening...';
-    };
-
-    recognition.onresult = (event) => {
-        let text = event.results[0][0].transcript;
-        const confidence = (event.results[0][0].confidence * 100).toFixed(0);
-        const lang = document.getElementById('voiceLang').value;
-        if (lang === 'th-TH') {
-            const thaiMap = {
-                'ไปข้างหน้า':'go forward','ข้างหน้า':'forward','หน้า':'forward',
-                'ถอยหลัง':'go backward','ข้างหลัง':'backward','หลัง':'backward',
-                'ซ้าย':'left','ไปซ้าย':'go left','ขวา':'right','ไปขวา':'go right',
-                'เหนือ':'north','ใต้':'south','ตะวันออก':'east','ตะวันตก':'west',
-                'เมตร':'meters','เซนติเมตร':'cm','ซม':'cm',
-                'หยุด':'stop','กลับบ้าน':'come back','กลับ':'come back','รีเซ็ต':'reset',
-                'หนึ่ง':'1','สอง':'2','สาม':'3','สี่':'4','ห้า':'5',
-                'หก':'6','เจ็ด':'7','แปด':'8','เก้า':'9','สิบ':'10',
-            };
-            let translated = text;
-            for (const [th, en] of Object.entries(thaiMap)) translated = translated.replace(new RegExp(th, 'g'), en);
-            if (translated !== text) { addAIBubble('[TH] ' + text, 'user'); text = translated; }
-        }
-        document.getElementById('aiInput').value = text;
-        addAIBubble('[Voice ' + confidence + '%] ' + text, 'user');
-        fetch('/api/ai/translate', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({text: text, user: getUsername() + ' (voice)'})
-        }).then(r => { if (!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
-          .then(data => {
-              if (data.error) addAIBubble(data.error, 'error');
-              else { addAIBubble(data.explanation, 'ai'); }
-              updateAIStatus();
-          })
-          .catch(err => addAIBubble('Error: ' + err.message, 'error'));
-    };
-
-    recognition.onerror = (e) => { if (e.error !== 'aborted') addAIBubble('Voice: ' + e.error, 'error'); stopVoice(); };
-    recognition.onend = () => stopVoice();
-    recognition.start();
-}
-
-function stopVoice() {
-    isListening = false;
-    document.getElementById('voiceBtn').classList.remove('listening');
-    document.getElementById('aiInput').placeholder = inputMode === 'chat' ? 'Say something to the room...' : 'Tell the robot what to do...';
-    if (recognition) { try { recognition.stop(); } catch(e) {} }
 }
 
 // ============ DEBUG TOGGLE (with morph) ============

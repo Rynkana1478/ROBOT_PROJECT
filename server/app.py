@@ -118,6 +118,12 @@ ai_command_queue = deque()  # legacy AI multi-step (kept for compat)
 ai_log = TeedDeque(maxlen=50, filename="ai.jsonl")
 chat_log = TeedDeque(maxlen=100, filename="chat.jsonl")
 
+# How many user/ai turns we replay back to the LLM for follow-up resolution.
+# 6 = last three exchanges. Bigger doesn't help — the model only needs enough
+# context to resolve "now" / "another", and longer history just costs tokens
+# and risks drowning the [NEW INPUT] in stale chatter.
+AI_HISTORY_TURNS = 6
+
 # ----- Request dedupe (prevents double-clicks / accidental re-submits from
 #       generating duplicate state changes or duplicate queue entries) -----
 _last_control = {"cmd": None, "ts": 0.0}
@@ -203,9 +209,18 @@ def robot_sync():
         # Prune master queue: drop items with id <= ingested_through
         # (robot has them in its ring buffer now).
         ingested = int(data.get("ingested_through", 0))
+        # Keep next_cmd_id ahead of the robot's _ingestedThrough. Server
+        # restart resets next_cmd_id back to 1, but the robot's counter
+        # is preserved across server restarts — without this bump, the
+        # first few new IDs collide with already-ingested ones and the
+        # robot silently drops them as duplicates, manifesting as "the
+        # first AI command after server restart never runs".
+        global next_cmd_id
         with _state_lock:
             while master_queue and master_queue[0]["id"] <= ingested:
                 master_queue.popleft()
+            if next_cmd_id <= ingested:
+                next_cmd_id = ingested + 1
 
         # Log completion edges
         now_completed = int(data.get("last_completed_id", 0))
@@ -337,8 +352,10 @@ def send_control():
         return jsonify({"ok": True, "test": cmd})
 
     if cmd == "backtrack":
-        cid = _enqueue({"type": "backtrack"})
+        # Flip mode BEFORE enqueue so the ESP never sees a cmd with stale mode
+        # (see same race fix in /api/ai/translate).
         robot_mode = "auto"
+        cid = _enqueue({"type": "backtrack"})
         return jsonify({"ok": True, "queued": "backtrack", "id": cid})
 
     return jsonify({"error": "invalid cmd"}), 400
@@ -366,8 +383,9 @@ def set_target():
         return jsonify({"ok": True, "deduped": True, "x": x, "y": y})
     _last_target["x"] = x; _last_target["y"] = y; _last_target["ts"] = now_ms
 
-    cid = _enqueue({"type": "set_target", "x": x, "y": y})
+    # Flip mode BEFORE enqueue (same race as /api/ai/translate).
     robot_mode = "auto"
+    cid = _enqueue({"type": "set_target", "x": x, "y": y})
     robot_state["target_wx"] = float(x)
     robot_state["target_wy"] = float(y)
     return jsonify({"ok": True, "id": cid, "x": x, "y": y})
@@ -427,7 +445,36 @@ def ai_translate_endpoint():
     if not user_text:
         return jsonify({"error": "empty text"}), 400
 
-    result = ai_translate(user_text)
+    # Build conversation history for the LLM: last N user/ai turns, oldest
+    # first. `cmd` and `error` entries are skipped — they're noise for
+    # follow-up resolution. The current user_text is NOT in chat_log yet
+    # (we append below), so it never duplicates into history.
+    history = []
+    for entry in list(chat_log)[-AI_HISTORY_TURNS * 4:]:  # over-sample, then trim
+        if entry.get("type") == "user":
+            history.append({"role": "user", "text": entry.get("text", "")})
+        elif entry.get("type") == "ai":
+            history.append({"role": "ai", "text": entry.get("text", "")})
+    history = history[-AI_HISTORY_TURNS:]
+
+    # Snapshot just the fields the LLM needs. robot_state has ~50 keys; sending
+    # all of them is wasteful and confuses the model with irrelevant flags.
+    state_for_ai = {
+        "pos_x":     robot_state.get("pos_x", 0),
+        "pos_y":     robot_state.get("pos_y", 0),
+        "heading":   robot_state.get("heading", 0),
+        "front":     robot_state.get("front", 0),
+        "left":      robot_state.get("left", 0),
+        "right":     robot_state.get("right", 0),
+        "nav_state": robot_state.get("nav_state", "IDLE"),
+        "mode":      robot_state.get("mode", "manual"),
+        "has_target":robot_state.get("has_target", False),
+        "target_wx": robot_state.get("target_wx", 0),
+        "target_wy": robot_state.get("target_wy", 0),
+        "battery":   robot_state.get("battery", 0),
+    }
+
+    result = ai_translate(user_text, history=history, state=state_for_ai)
     result["user"] = username
     ts = time.strftime("%H:%M:%S")
     chat_log.append({"time": ts, "user": username, "type": "user", "text": user_text})
@@ -442,25 +489,66 @@ def ai_translate_endpoint():
     chat_log.append({"time": ts, "user": "AI", "type": "ai", "text": result['explanation']})
 
     commands = result.get("commands", [])
+
+    # Flip to auto BEFORE enqueueing any cmd. Otherwise there's a window where
+    # the cmd is visible in master_queue but robot_mode is still "manual" —
+    # ESP syncs at 50ms in manual mode, picks up the cmd while still being told
+    # mode=manual, ingests it into its ring buffer but never executes it. The
+    # chat_log.append() file write inside the enqueue loop widened that window
+    # to several ms, making the first AI command after idle reliably drop.
+    auto_actions = {"set_target", "move_relative", "turn_relative", "backtrack"}
+    if any(c.get("action") in auto_actions for c in commands):
+        robot_mode = "auto"
+
+    # Threshold below which a relative motion is "no movement" — anything
+    # under this rounds to the chassis's NAV_REACHED_CM (5 cm) and the chassis
+    # would instantly ack REACHED without doing anything useful, then pop the
+    # next cmd, repeat. Multi-cmd plans visibly stutter. Drop here instead.
+    DEGEN_MOVE_CM    = 1.0
+    DEGEN_TURN_DEG   = 0.5
+
     enqueued_ids = []
     for cmd in commands:
         action = cmd.get("action", "")
+        cid = None
         if action == "set_target":
             cid = _enqueue({"type": "set_target",
                             "x": float(cmd.get("x", 0)), "y": float(cmd.get("y", 0))})
             enqueued_ids.append(cid)
+            debug_logs.append(
+                f"[{ts}] [AI] -> set_target id={cid} "
+                f"x={float(cmd.get('x', 0)):.0f} y={float(cmd.get('y', 0)):.0f}")
         elif action == "move_relative":
-            cid = _enqueue({"type": "move_relative",
-                            "x": float(cmd.get("right", 0)),
-                            "y": float(cmd.get("forward", 0))})
+            fwd  = float(cmd.get("forward", 0))
+            right = float(cmd.get("right", 0))
+            # Skip no-op moves: target would be at current pos, chassis would
+            # ack REACHED on the first tick and stutter to the next cmd.
+            if abs(fwd) < DEGEN_MOVE_CM and abs(right) < DEGEN_MOVE_CM:
+                debug_logs.append(
+                    f"[{ts}] [AI] -> SKIPPED move_relative fwd={fwd:.0f} right={right:.0f} "
+                    f"(zero distance — would no-op the chassis)")
+                continue
+            cid = _enqueue({"type": "move_relative", "x": right, "y": fwd})
             enqueued_ids.append(cid)
+            debug_logs.append(
+                f"[{ts}] [AI] -> move_relative id={cid} "
+                f"forward={fwd:.0f} right={right:.0f}")
         elif action == "turn_relative":
-            cid = _enqueue({"type": "turn_relative",
-                            "heading": float(cmd.get("degrees", 0))})
+            deg = float(cmd.get("degrees", 0))
+            # Skip no-op turns: same reason as zero moves.
+            if abs(deg) < DEGEN_TURN_DEG:
+                debug_logs.append(
+                    f"[{ts}] [AI] -> SKIPPED turn_relative deg={deg:.1f} "
+                    f"(no rotation — would no-op the chassis)")
+                continue
+            cid = _enqueue({"type": "turn_relative", "heading": deg})
             enqueued_ids.append(cid)
+            debug_logs.append(
+                f"[{ts}] [AI] -> turn_relative id={cid} deg={deg:.1f}")
         elif action == "backtrack":
             cid = _enqueue({"type": "backtrack"})
             enqueued_ids.append(cid)
+            debug_logs.append(f"[{ts}] [AI] -> backtrack id={cid}")
         elif action == "stop":
             # Hard stop: switch to manual + clear queue
             global manual_state, queue_clear_pending
@@ -469,10 +557,21 @@ def ai_translate_endpoint():
             with _state_lock:
                 master_queue.clear()
             queue_clear_pending = True
-        chat_log.append({"time": ts, "user": "AI", "type": "cmd", "text": json.dumps(cmd)})
+            debug_logs.append(f"[{ts}] [AI] -> stop (queue cleared, mode=manual)")
+        elif action == "reply":
+            # Text-only — log the answer text so it's visible in the debug feed
+            # alongside the user's question.
+            debug_logs.append(f"[{ts}] [AI] -> reply \"{result.get('explanation', '')}\"")
+        else:
+            # Unknown action — log so we can debug LLM drift instead of silently
+            # dropping it.
+            debug_logs.append(f"[{ts}] [AI] -> UNKNOWN action={action!r} cmd={json.dumps(cmd)}")
+        # `reply` is text-only — the explanation already went out as an "ai"
+        # bubble above. Don't dump a duplicate {"action":"reply"} cmd bubble.
+        if action != "reply":
+            chat_log.append({"time": ts, "user": "AI", "type": "cmd", "text": json.dumps(cmd)})
 
     if enqueued_ids:
-        robot_mode = "auto"
         debug_logs.append(f"[{ts}] [AI] enqueued {len(enqueued_ids)} cmd(s) ids={enqueued_ids}")
 
     result["enqueued_ids"] = enqueued_ids

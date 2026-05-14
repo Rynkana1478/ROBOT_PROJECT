@@ -173,18 +173,13 @@ public:
                 }
 
                 if (distTarget < NAV_REACHED_CM) {
-                    if (pf.isBacktracking()) {
-                        if (!pf.updateBacktrack(posX, posY)) {
-                            state = NAV_REACHED;
-                            motors.stop();
-                        } else {
-                            state = NAV_TURNING;
-                        }
-                    } else {
-                        state = NAV_REACHED;
-                        motors.stop();
-                        pf.targetReached = true;
-                    }
+                    // Same reach path for regular targets AND backtrack.
+                    // Backtrack is now just a single target = (0,0); the
+                    // pathfinder's distance check in updateRobotWorld() flips
+                    // targetReached, and we ack here.
+                    state = NAV_REACHED;
+                    motors.stop();
+                    pf.targetReached = true;
                     break;
                 }
 

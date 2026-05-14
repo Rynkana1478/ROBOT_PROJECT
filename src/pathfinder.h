@@ -30,7 +30,7 @@ public:
     float crumbX[MAX_CRUMBS];
     float crumbY[MAX_CRUMBS];
     int   crumbCount = 0;
-    int   backtrackIdx = -1;
+    bool  _backtracking = false;  // true while a backtrack-to-origin is active
 
     void begin() {
         clearMap();
@@ -39,7 +39,7 @@ public:
         hasTarget = false;
         targetReached = false;
         crumbCount = 0;
-        backtrackIdx = -1;
+        _backtracking = false;
         gridDirty = true;
         worldOriginX = -(GRID_SIZE / 2) * CELL_SIZE_CM;
         worldOriginY = -(GRID_SIZE / 2) * CELL_SIZE_CM;
@@ -56,6 +56,7 @@ public:
         hasTarget = true;
         targetReached = false;
         turnOnly = false;        // any positional target uses distance-based reach
+        _backtracking = false;   // regular target — not a homing run
         updateTargetGrid();
     }
 
@@ -141,34 +142,36 @@ public:
         return rightFree - leftFree;
     }
 
+    // Backtracking = drive back to the world origin (0,0). Origin is wherever
+    // the robot was at boot or at the last CMD_RESET. Previously this walked
+    // the breadcrumb trail in reverse, but the early crumbs weren't always at
+    // (0,0) (depends on when crumb-0 was dropped vs. when reset ran), and the
+    // 20cm-spaced stop-and-go added a lot of churn on a path the navigator's
+    // reactive avoidance could handle in one shot. Crumbs are still dropped
+    // for the dashboard visualization, just not used for return-to-home.
     void startBacktrack() {
-        if (crumbCount == 0) return;
-        backtrackIdx = crumbCount - 1;
+        targetWorldX = 0.0f;
+        targetWorldY = 0.0f;
         hasTarget = true;
         targetReached = false;
-        targetWorldX = crumbX[backtrackIdx];
-        targetWorldY = crumbY[backtrackIdx];
+        turnOnly = false;
+        _backtracking = true;
         updateTargetGrid();
     }
 
-    bool updateBacktrack(float rx, float ry) {
-        if (backtrackIdx < 0) return false;
-
-        if (dist2D(rx, ry, crumbX[backtrackIdx], crumbY[backtrackIdx]) < NAV_REACHED_CM) {
-            backtrackIdx--;
-            if (backtrackIdx < 0) {
-                hasTarget = false;
-                targetReached = true;
-                return false;
-            }
-            targetWorldX = crumbX[backtrackIdx];
-            targetWorldY = crumbY[backtrackIdx];
-            updateTargetGrid();
+    // Kept for source-level compat with any caller; backtracking now reaches
+    // (0,0) via the standard distance-to-target check in updateRobotWorld().
+    // Returns true while still en route, false once reached / inactive.
+    bool updateBacktrack(float /*rx*/, float /*ry*/) {
+        if (!_backtracking) return false;
+        if (targetReached) {
+            _backtracking = false;
+            return false;
         }
         return true;
     }
 
-    bool isBacktracking() { return backtrackIdx >= 0; }
+    bool isBacktracking() { return _backtracking && hasTarget && !targetReached; }
 
     float distToTarget(float wx, float wy) {
         return dist2D(wx, wy, targetWorldX, targetWorldY);

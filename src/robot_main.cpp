@@ -306,20 +306,39 @@ void loop() {
 
         if (pathfinder.hasTarget && !pathfinder.targetReached &&
             navigator.state != NAV_FAILED) {
-            if (pathfinder.isBacktracking())
-                pathfinder.updateBacktrack(encoder.posX, encoder.posY);
             navigator.update(sensors, motors, pathfinder,
                              encoder.posX, encoder.posY, sensors.heading);
         } else {
-            // Target finished or failed → ack and clear, ready for next pop
+            // Target finished or failed → ack and clear, ready for next pop.
+            // Also clear targetReached so this branch doesn't re-fire every
+            // tick while we wait for the next queued command — otherwise the
+            // log spams "[NAV] target reached" 20x/s until a new cmd lands.
             if (pathfinder.targetReached) {
+                // Log enough geometry to distinguish "legit positional reach"
+                // from "turn-only reach mid-trajectory" — the latter looks
+                // wrong to the user when it fires for an intermediate cmd
+                // of a multi-step plan. dist=0 with state=NAV_REACHED via
+                // NAV_TURN_ONLY = heading goal hit; dist≈0 = positional hit.
+                float dx = encoder.posX - pathfinder.targetWorldX;
+                float dy = encoder.posY - pathfinder.targetWorldY;
+                float dist = sqrt(dx * dx + dy * dy);
+                uint32_t doneId = cmdQueue.currentTargetId();
                 cmdQueue.completeCurrent("REACHED");
                 pathfinder.hasTarget = false;
-                Debug::log("[NAV] target reached");
+                pathfinder.targetReached = false;
+                Debug::logf("[NAV] reached id=%lu pos=(%.0f,%.0f) tgt=(%.0f,%.0f) dist=%.0fcm",
+                            doneId, encoder.posX, encoder.posY,
+                            pathfinder.targetWorldX, pathfinder.targetWorldY, dist);
             } else if (navigator.state == NAV_FAILED) {
+                float dx = encoder.posX - pathfinder.targetWorldX;
+                float dy = encoder.posY - pathfinder.targetWorldY;
+                float dist = sqrt(dx * dx + dy * dy);
+                uint32_t doneId = cmdQueue.currentTargetId();
                 cmdQueue.completeCurrent("FAILED_STUCK");
                 pathfinder.hasTarget = false;
-                Debug::log("[NAV] target failed (stuck)");
+                Debug::logf("[NAV] failed id=%lu pos=(%.0f,%.0f) tgt=(%.0f,%.0f) dist=%.0fcm",
+                            doneId, encoder.posX, encoder.posY,
+                            pathfinder.targetWorldX, pathfinder.targetWorldY, dist);
                 navigator.state = NAV_IDLE;
             }
             if (motors.getState() != Motors::M_STOP &&
@@ -783,20 +802,40 @@ void ingestPendingResp() {
 // ============================================
 void executeQueuedCmd(const QueuedCmd &cmd) {
     switch (cmd.type) {
-        case CMD_SET_TARGET:
+        case CMD_SET_TARGET: {
+            // Sanity check: warn if the target is essentially where we already
+            // are. Server should already drop these, but if one slips through
+            // we want to see it in the log instead of silently 1-tick-ack'ing.
+            float dx = cmd.x - encoder.posX;
+            float dy = cmd.y - encoder.posY;
+            float d  = sqrt(dx * dx + dy * dy);
+            if (d < NAV_REACHED_CM) {
+                Debug::logf("[QUEUE] -> set_target id=%lu (%.0f,%.0f) WARN "
+                            "dist=%.0fcm from current pos, will instant-ack",
+                            cmd.id, cmd.x, cmd.y, d);
+            } else {
+                Debug::logf("[QUEUE] -> set_target id=%lu (%.0f,%.0f)",
+                            cmd.id, cmd.x, cmd.y);
+            }
             pathfinder.setTargetWorld(cmd.x, cmd.y);
             navigator.setTarget(motors, encoder.posX, encoder.posY);
-            Debug::logf("[QUEUE] -> set_target id=%lu (%.0f,%.0f)",
-                        cmd.id, cmd.x, cmd.y);
             break;
+        }
         case CMD_MOVE_RELATIVE: {
             float h = sensors.headingRad;
             float dx = cmd.y * sin(h) + cmd.x * cos(h);
             float dy = cmd.y * cos(h) - cmd.x * sin(h);
+            float dist = sqrt(dx * dx + dy * dy);
+            if (dist < NAV_REACHED_CM) {
+                Debug::logf("[QUEUE] -> move_relative id=%lu fwd=%.0f right=%.0f "
+                            "WARN dist=%.1fcm, will instant-ack",
+                            cmd.id, cmd.y, cmd.x, dist);
+            } else {
+                Debug::logf("[QUEUE] -> move_relative id=%lu fwd=%.0f right=%.0f",
+                            cmd.id, cmd.y, cmd.x);
+            }
             pathfinder.setTargetWorld(encoder.posX + dx, encoder.posY + dy);
             navigator.setTarget(motors, encoder.posX, encoder.posY);
-            Debug::logf("[QUEUE] -> move_relative id=%lu fwd=%.0f right=%.0f",
-                        cmd.id, cmd.y, cmd.x);
             break;
         }
         case CMD_TURN_RELATIVE: {
@@ -807,8 +846,14 @@ void executeQueuedCmd(const QueuedCmd &cmd) {
             pathfinder.targetReached = false;
             pathfinder.turnOnly = true;
             navigator.setTurnTarget(motors, sensors.heading, cmd.heading);
-            Debug::logf("[QUEUE] -> turn_relative id=%lu deg=%.1f",
-                        cmd.id, cmd.heading);
+            if (fabs(cmd.heading) < 0.5f) {
+                Debug::logf("[QUEUE] -> turn_relative id=%lu deg=%.1f "
+                            "WARN ~0 degrees, will instant-ack",
+                            cmd.id, cmd.heading);
+            } else {
+                Debug::logf("[QUEUE] -> turn_relative id=%lu deg=%.1f",
+                            cmd.id, cmd.heading);
+            }
             break;
         }
         case CMD_BACKTRACK:
